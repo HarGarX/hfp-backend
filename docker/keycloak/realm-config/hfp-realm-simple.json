@@ -1,0 +1,108 @@
+{
+  "realm": "hfp",
+  "displayName": "Household Financial Platform",
+  "enabled": true,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "defaultRoles": ["default-roles-hfp", "offline_access", "uma_authorization"],
+  "requiredCredentials": ["password"],
+  "clients": [
+    {
+      "clientId": "hfp-backend",
+      "name": "HFP Backend Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "hfp-backend-secret-change-in-production",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true
+    },
+    {
+      "clientId": "hfp-frontend",
+      "name": "HFP Frontend Application",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:5173"
+      ],
+      "protocol": "openid-connect"
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "hfp-user",
+        "description": "Basic HFP user role"
+      },
+      {
+        "name": "household-viewer",
+        "description": "Can view household data"
+      },
+      {
+        "name": "household-member",
+        "description": "Can manage own data within household"
+      },
+      {
+        "name": "household-admin",
+        "description": "Can manage household and its members"
+      },
+      {
+        "name": "system-admin",
+        "description": "System administrator with full access"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin@hfp.com",
+      "enabled": true,
+      "email": "admin@hfp.com",
+      "emailVerified": true,
+      "firstName": "System",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["system-admin", "hfp-user"]
+    },
+    {
+      "username": "demo@household1.com",
+      "enabled": true,
+      "email": "demo@household1.com",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["household-admin", "hfp-user"]
+    }
+  ]
+}

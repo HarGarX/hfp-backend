@@ -1,124 +1,118 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Repository, SelectQueryBuilder } from 'typeorm';
-import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException, ConflictException } from '@nestjs/common';
-
 import { HouseholdsService } from './households.service';
-import { Household, HouseholdStatus } from './entities/household.entity';
-import { CreateHouseholdDto } from './dto/create-household.dto';
-import { UpdateHouseholdDto } from './dto/update-household.dto';
-
-// Mock QueryBuilder
-class MockQueryBuilder {
-  where = jest.fn().mockReturnThis();
-  andWhere = jest.fn().mockReturnThis();
-  orderBy = jest.fn().mockReturnThis();
-  skip = jest.fn().mockReturnThis();
-  take = jest.fn().mockReturnThis();
-  getManyAndCount = jest.fn();
-}
-
-// Mock Repository class
-class MockRepository<T> {
-  findOneBy = jest.fn();
-  findOne = jest.fn();
-  save = jest.fn();
-  create = jest.fn();
-  find = jest.fn();
-  remove = jest.fn();
-  softDelete = jest.fn();
-  increment = jest.fn();
-  update = jest.fn();
-  createQueryBuilder = jest.fn().mockReturnValue(new MockQueryBuilder());
-}
+import { HouseholdRepository } from './repositories/household.repository';
+import { TenantContextService } from '../../libs/tenant';
+import { ConflictException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { HouseholdStatus } from './entities/household.entity';
 
 describe('HouseholdsService', () => {
   let service: HouseholdsService;
-  let repository: MockRepository<Household>;
+  let mockRepository: jest.Mocked<HouseholdRepository>;
+  let mockTenantContext: jest.Mocked<TenantContextService>;
 
   beforeEach(async () => {
+    const mockRepositoryValue = {
+      findByName: jest.fn(),
+      create: jest.fn(),
+      findAllPaginated: jest.fn(),
+      findById: jest.fn(),
+      update: jest.fn(),
+      softDelete: jest.fn(),
+      updateMemberCount: jest.fn(),
+      getStatistics: jest.fn(),
+      activate: jest.fn(),
+      deactivate: jest.fn(),
+      suspend: jest.fn(),
+      countActiveMembers: jest.fn(),
+    };
+
+    const mockTenantContextValue = {
+      getTenantId: jest.fn().mockReturnValue('test-tenant'),
+      getUserId: jest.fn().mockReturnValue('test-user'),
+      getTenantContext: jest.fn().mockReturnValue({ tenantId: 'test-tenant', userId: 'test-user' }),
+      requireTenantContext: jest.fn().mockReturnValue({ tenantId: 'test-tenant', userId: 'test-user' }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         HouseholdsService,
         {
-          provide: getRepositoryToken(Household),
-          useClass: MockRepository,
+          provide: HouseholdRepository,
+          useValue: mockRepositoryValue,
+        },
+        {
+          provide: TenantContextService,
+          useValue: mockTenantContextValue,
         },
       ],
     }).compile();
 
     service = module.get<HouseholdsService>(HouseholdsService);
-    repository = module.get(getRepositoryToken(Household));
+    mockRepository = module.get(HouseholdRepository);
+    mockTenantContext = module.get(TenantContextService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
   });
 
   describe('create', () => {
-    it('should create a new household successfully', async () => {
-      const createDto: CreateHouseholdDto = {
-        name: 'Test Household',
-        description: 'Test description',
-        default_currency: 'EUR',
-      };
+    const createDto = {
+      name: 'Test Household',
+      description: 'Test description',
+    };
 
-      const mockHousehold = {
+    it('should create a household successfully', async () => {
+      const expectedHousehold = {
         id: 'household-123',
-        name: 'Test Household',
-        description: 'Test description',
         status: HouseholdStatus.ACTIVE,
-        default_currency: 'EUR',
+        default_currency: 'USD',
         member_count: 0,
         total_income: 0,
         total_expenses: 0,
+        ...createDto,
       };
 
-      jest.spyOn(repository, 'findOne').mockResolvedValue(null); // No existing household
-      jest.spyOn(repository, 'create').mockReturnValue(mockHousehold as any);
-      jest.spyOn(repository, 'save').mockResolvedValue(mockHousehold as any);
+      mockRepository.findByName.mockResolvedValue(null);
+      mockRepository.create.mockResolvedValue(expectedHousehold as any);
 
       const result = await service.create(createDto);
 
-      expect(result).toEqual(mockHousehold);
-      expect(repository.findOne).toHaveBeenCalledWith({
-        where: { name: 'Test Household' }
-      });
-      expect(repository.create).toHaveBeenCalledWith({
+      expect(mockRepository.findByName).toHaveBeenCalledWith('Test Household');
+      expect(mockRepository.create).toHaveBeenCalledWith({
         ...createDto,
         status: HouseholdStatus.ACTIVE,
-        default_currency: 'EUR',
+        default_currency: 'USD',
         member_count: 0,
         total_income: 0,
         total_expenses: 0,
       });
+      expect(result).toEqual(expectedHousehold);
     });
 
-    it('should throw ConflictException when household with same name exists', async () => {
-      const createDto: CreateHouseholdDto = {
-        name: 'Existing Household',
-      };
-
-      const existingHousehold = { id: '123', name: 'Existing Household' };
-      jest.spyOn(repository, 'findOne').mockResolvedValue(existingHousehold as any);
+    it('should throw ConflictException when household name exists', async () => {
+      const existingHousehold = { id: 'existing-123', name: 'Test Household' };
+      mockRepository.findByName.mockResolvedValue(existingHousehold as any);
 
       await expect(service.create(createDto)).rejects.toThrow(ConflictException);
-      expect(repository.findOne).toHaveBeenCalledWith({
-        where: { name: 'Existing Household' }
-      });
+      expect(mockRepository.findByName).toHaveBeenCalledWith('Test Household');
+      expect(mockRepository.create).not.toHaveBeenCalled();
     });
 
-    it('should use default values for optional fields', async () => {
-      const createDto: CreateHouseholdDto = {
-        name: 'Simple Household',
+    it('should use provided status and currency', async () => {
+      const createDtoWithCustom = {
+        ...createDto,
+        status: HouseholdStatus.INACTIVE,
+        default_currency: 'EUR',
       };
 
-      jest.spyOn(repository, 'findOne').mockResolvedValue(null);
-      jest.spyOn(repository, 'create').mockReturnValue({} as any);
-      jest.spyOn(repository, 'save').mockResolvedValue({} as any);
+      mockRepository.findByName.mockResolvedValue(null);
+      mockRepository.create.mockResolvedValue({} as any);
 
-      await service.create(createDto);
+      await service.create(createDtoWithCustom);
 
-      expect(repository.create).toHaveBeenCalledWith({
-        name: 'Simple Household',
-        status: HouseholdStatus.ACTIVE,
-        default_currency: 'USD',
+      expect(mockRepository.create).toHaveBeenCalledWith({
+        ...createDtoWithCustom,
         member_count: 0,
         total_income: 0,
         total_expenses: 0,
@@ -128,269 +122,215 @@ describe('HouseholdsService', () => {
 
   describe('findAll', () => {
     it('should return paginated households with default options', async () => {
-      const mockHouseholds = [
-        { id: '1', name: 'Household 1', status: HouseholdStatus.ACTIVE },
-        { id: '2', name: 'Household 2', status: HouseholdStatus.ACTIVE },
-      ];
-
-      const mockQueryBuilder = {
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([mockHouseholds, 2]),
-      };
-
-      jest.spyOn(repository, 'createQueryBuilder').mockReturnValue(mockQueryBuilder as any);
-
-      const result = await service.findAll();
-
-      expect(result).toEqual({
-        households: mockHouseholds,
+      const expectedResult = {
+        households: [
+          { 
+            id: '1', 
+            name: 'Household 1',
+            status: HouseholdStatus.ACTIVE,
+            default_currency: 'USD',
+            member_count: 1,
+            total_income: 0,
+            total_expenses: 0,
+            created_at: new Date(),
+            updated_at: new Date(),
+            deleted_at: null,
+            users: [],
+          },
+          { 
+            id: '2', 
+            name: 'Household 2',
+            status: HouseholdStatus.ACTIVE,
+            default_currency: 'USD',
+            member_count: 1,
+            total_income: 0,
+            total_expenses: 0,
+            created_at: new Date(),
+            updated_at: new Date(),
+            deleted_at: null,
+            users: [],
+          },
+        ] as any[],
         total: 2,
         page: 1,
         totalPages: 1,
-      });
-      expect(mockQueryBuilder.skip).toHaveBeenCalledWith(0);
-      expect(mockQueryBuilder.take).toHaveBeenCalledWith(10);
-    });
-
-    it('should apply search filter when provided', async () => {
-      const mockQueryBuilder = {
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
       };
 
-      jest.spyOn(repository, 'createQueryBuilder').mockReturnValue(mockQueryBuilder as any);
+      mockRepository.findAllPaginated.mockResolvedValue(expectedResult);
 
-      await service.findAll({ search: 'test search' });
+      const result = await service.findAll();
 
-      expect(mockQueryBuilder.where).toHaveBeenCalledWith(
-        '(household.name ILIKE :search OR household.description ILIKE :search)',
-        { search: '%test search%' }
-      );
+      expect(mockRepository.findAllPaginated).toHaveBeenCalledWith({});
+      expect(result).toEqual(expectedResult);
     });
 
-    it('should apply status filter when provided', async () => {
-      const mockQueryBuilder = {
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
-      };
+    it('should pass options to repository', async () => {
+      const options = { page: 2, limit: 10, search: 'test' };
+      mockRepository.findAllPaginated.mockResolvedValue({} as any);
 
-      jest.spyOn(repository, 'createQueryBuilder').mockReturnValue(mockQueryBuilder as any);
+      await service.findAll(options);
 
-      await service.findAll({ status: HouseholdStatus.INACTIVE });
-
-      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'household.status = :status',
-        { status: HouseholdStatus.INACTIVE }
-      );
-    });
-
-    it('should handle pagination correctly', async () => {
-      const mockQueryBuilder = {
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[], 25]),
-      };
-
-      jest.spyOn(repository, 'createQueryBuilder').mockReturnValue(mockQueryBuilder as any);
-
-      const result = await service.findAll({ page: 3, limit: 5 });
-
-      expect(mockQueryBuilder.skip).toHaveBeenCalledWith(10); // (3-1) * 5
-      expect(mockQueryBuilder.take).toHaveBeenCalledWith(5);
-      expect(result.page).toBe(3);
-      expect(result.totalPages).toBe(5); // Math.ceil(25/5)
+      expect(mockRepository.findAllPaginated).toHaveBeenCalledWith(options);
     });
   });
 
   describe('findOne', () => {
     it('should return household when found', async () => {
-      const mockHousehold = {
-        id: 'household-123',
-        name: 'Test Household',
-        status: HouseholdStatus.ACTIVE,
-      };
-
-      const mockQueryBuilder = {
-        where: jest.fn().mockReturnThis(),
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue(mockHousehold),
-      };
-
-      jest.spyOn(repository, 'createQueryBuilder').mockReturnValue(mockQueryBuilder as any);
+      const household = { id: 'household-123', name: 'Test Household' };
+      mockRepository.findById.mockResolvedValue(household as any);
 
       const result = await service.findOne('household-123');
 
-      expect(result).toEqual(mockHousehold);
-      expect(mockQueryBuilder.where).toHaveBeenCalledWith('household.id = :id', { id: 'household-123' });
-      expect(mockQueryBuilder.leftJoinAndSelect).toHaveBeenCalledWith('household.users', 'users');
+      expect(mockRepository.findById).toHaveBeenCalledWith('household-123');
+      expect(result).toEqual(household);
     });
 
     it('should throw NotFoundException when household not found', async () => {
-      const mockQueryBuilder = {
-        where: jest.fn().mockReturnThis(),
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue(null),
-      };
-
-      jest.spyOn(repository, 'createQueryBuilder').mockReturnValue(mockQueryBuilder as any);
+      mockRepository.findById.mockResolvedValue(null);
 
       await expect(service.findOne('nonexistent-id')).rejects.toThrow(NotFoundException);
+      expect(mockRepository.findById).toHaveBeenCalledWith('nonexistent-id');
     });
   });
 
   describe('update', () => {
+    const updateDto = { name: 'Updated Household' };
+
     it('should update household successfully', async () => {
-      const updateDto: UpdateHouseholdDto = {
-        name: 'Updated Household',
-        description: 'Updated description',
-      };
+      const updatedHousehold = { id: 'household-123', ...updateDto };
 
-      const existingHousehold = {
-        id: 'household-123',
-        name: 'Old Name',
-        description: 'Old description',
-      };
-
-      const updatedHousehold = {
-        ...existingHousehold,
-        ...updateDto,
-      };
-
-      jest.spyOn(service, 'findOne').mockResolvedValue(existingHousehold as any);
-      jest.spyOn(repository, 'findOne').mockResolvedValue(null); // No name conflict
-      jest.spyOn(repository, 'save').mockResolvedValue(updatedHousehold as any);
+      mockRepository.findByName.mockResolvedValue(null); // No name conflict
+      mockRepository.update.mockResolvedValue(updatedHousehold as any);
 
       const result = await service.update('household-123', updateDto);
 
+      expect(mockRepository.findByName).toHaveBeenCalledWith('Updated Household');
+      expect(mockRepository.update).toHaveBeenCalledWith('household-123', updateDto);
       expect(result).toEqual(updatedHousehold);
-      expect(repository.save).toHaveBeenCalledWith(updatedHousehold);
     });
 
-    it('should throw ConflictException when updating to existing household name', async () => {
-      const updateDto: UpdateHouseholdDto = {
-        name: 'Existing Name',
-      };
-
-      const existingHousehold = {
-        id: 'household-123',
-        name: 'Current Name',
-      };
-
-      const conflictingHousehold = {
-        id: 'other-household',
-        name: 'Existing Name',
-      };
-
-      jest.spyOn(service, 'findOne').mockResolvedValue(existingHousehold as any);
-      jest.spyOn(repository, 'findOne').mockResolvedValue(conflictingHousehold as any);
+    it('should throw ConflictException when name conflicts with another household', async () => {
+      const conflictingHousehold = { id: 'different-id', name: 'Updated Household' };
+      mockRepository.findByName.mockResolvedValue(conflictingHousehold as any);
 
       await expect(service.update('household-123', updateDto)).rejects.toThrow(ConflictException);
+      expect(mockRepository.findByName).toHaveBeenCalledWith('Updated Household');
+      expect(mockRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('should allow updating to same name for same household', async () => {
+      const sameHousehold = { id: 'household-123', name: 'Updated Household' };
+      mockRepository.findByName.mockResolvedValue(sameHousehold as any);
+      mockRepository.update.mockResolvedValue(sameHousehold as any);
+
+      const result = await service.update('household-123', updateDto);
+
+      expect(mockRepository.update).toHaveBeenCalledWith('household-123', updateDto);
+      expect(result).toEqual(sameHousehold);
+    });
+
+    it('should throw NotFoundException when household not found', async () => {
+      mockRepository.findByName.mockResolvedValue(null);
+      mockRepository.update.mockResolvedValue(null);
+
+      await expect(service.update('household-123', updateDto)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should skip name check when not updating name', async () => {
+      const updateDtoWithoutName = { description: 'Updated description' };
+      const updatedHousehold = { id: 'household-123', description: 'Updated description' };
+
+      mockRepository.update.mockResolvedValue(updatedHousehold as any);
+
+      const result = await service.update('household-123', updateDtoWithoutName);
+
+      expect(mockRepository.findByName).not.toHaveBeenCalled();
+      expect(mockRepository.update).toHaveBeenCalledWith('household-123', updateDtoWithoutName);
+      expect(result).toEqual(updatedHousehold);
     });
   });
 
   describe('remove', () => {
-    it('should remove household when it has no members', async () => {
-      const household = {
-        id: 'household-123',
-        name: 'Empty Household',
-        member_count: 0,
-      };
-
-      jest.spyOn(service, 'findOne').mockResolvedValue(household as any);
-      jest.spyOn(repository, 'softDelete').mockResolvedValue({} as any);
+    it('should remove household successfully when no members', async () => {
+      const household = { id: 'household-123', member_count: 0 };
+      mockRepository.findById.mockResolvedValue(household as any);
+      mockRepository.softDelete.mockResolvedValue(true);
 
       await service.remove('household-123');
 
-      expect(repository.softDelete).toHaveBeenCalledWith('household-123');
+      expect(mockRepository.findById).toHaveBeenCalledWith('household-123');
+      expect(mockRepository.softDelete).toHaveBeenCalledWith('household-123');
     });
 
-    it('should throw ConflictException when household has active members', async () => {
-      const household = {
-        id: 'household-123',
-        name: 'Active Household',
-        member_count: 3,
-      };
-
-      jest.spyOn(service, 'findOne').mockResolvedValue(household as any);
+    it('should throw ConflictException when household has members', async () => {
+      const household = { id: 'household-123', member_count: 2 };
+      mockRepository.findById.mockResolvedValue(household as any);
 
       await expect(service.remove('household-123')).rejects.toThrow(ConflictException);
-      expect(repository.softDelete).not.toHaveBeenCalled();
+      expect(mockRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when household not found', async () => {
+      mockRepository.findById.mockResolvedValue(null);
+
+      await expect(service.remove('household-123')).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw ForbiddenException when soft delete fails', async () => {
+      const household = { id: 'household-123', member_count: 0 };
+      mockRepository.findById.mockResolvedValue(household as any);
+      mockRepository.softDelete.mockResolvedValue(false);
+
+      await expect(service.remove('household-123')).rejects.toThrow(ForbiddenException);
     });
   });
 
   describe('updateMemberCount', () => {
-    it('should increment member count', async () => {
-      jest.spyOn(repository, 'increment').mockResolvedValue({} as any);
+    it('should update member count', async () => {
+      mockRepository.updateMemberCount.mockResolvedValue();
 
-      await service.updateMemberCount('household-123', 2);
+      await service.updateMemberCount('household-123');
 
-      expect(repository.increment).toHaveBeenCalledWith(
-        { id: 'household-123' },
-        'member_count',
-        2
-      );
-    });
-
-    it('should decrement member count with negative increment', async () => {
-      jest.spyOn(repository, 'increment').mockResolvedValue({} as any);
-
-      await service.updateMemberCount('household-123', -1);
-
-      expect(repository.increment).toHaveBeenCalledWith(
-        { id: 'household-123' },
-        'member_count',
-        -1
-      );
+      expect(mockRepository.updateMemberCount).toHaveBeenCalledWith('household-123');
     });
   });
 
   describe('updateFinancials', () => {
-    it('should update income and expenses', async () => {
-      jest.spyOn(repository, 'update').mockResolvedValue({} as any);
+    it('should update both income and expenses', async () => {
+      mockRepository.update.mockResolvedValue({} as any);
 
       await service.updateFinancials('household-123', 50000, 30000);
 
-      expect(repository.update).toHaveBeenCalledWith('household-123', {
+      expect(mockRepository.update).toHaveBeenCalledWith('household-123', {
         total_income: 50000,
         total_expenses: 30000,
       });
     });
 
     it('should update only income when expenses not provided', async () => {
-      jest.spyOn(repository, 'update').mockResolvedValue({} as any);
+      mockRepository.update.mockResolvedValue({} as any);
 
       await service.updateFinancials('household-123', 60000);
 
-      expect(repository.update).toHaveBeenCalledWith('household-123', {
+      expect(mockRepository.update).toHaveBeenCalledWith('household-123', {
         total_income: 60000,
       });
     });
 
-    it('should not update anything when no values provided', async () => {
-      jest.spyOn(repository, 'update').mockResolvedValue({} as any);
+    it('should update only expenses when income not provided', async () => {
+      mockRepository.update.mockResolvedValue({} as any);
 
+      await service.updateFinancials('household-123', undefined, 35000);
+
+      expect(mockRepository.update).toHaveBeenCalledWith('household-123', {
+        total_expenses: 35000,
+      });
+    });
+
+    it('should not call update when no values provided', async () => {
       await service.updateFinancials('household-123');
 
-      expect(repository.update).not.toHaveBeenCalled();
+      expect(mockRepository.update).not.toHaveBeenCalled();
     });
   });
 
@@ -404,7 +344,7 @@ describe('HouseholdsService', () => {
         status: HouseholdStatus.ACTIVE,
       };
 
-      jest.spyOn(service, 'findOne').mockResolvedValue(household as any);
+      mockRepository.findById.mockResolvedValue(household as any);
 
       const result = await service.getHouseholdStats('household-123');
 
@@ -420,27 +360,36 @@ describe('HouseholdsService', () => {
 
   describe('status management', () => {
     it('should activate household', async () => {
-      jest.spyOn(service, 'update').mockResolvedValue({} as any);
+      const household = { id: 'household-123', status: HouseholdStatus.ACTIVE };
+      mockRepository.findByName.mockResolvedValue(null);
+      mockRepository.update.mockResolvedValue(household as any);
 
-      await service.activate('household-123');
+      const result = await service.activate('household-123');
 
-      expect(service.update).toHaveBeenCalledWith('household-123', { status: HouseholdStatus.ACTIVE });
+      expect(mockRepository.update).toHaveBeenCalledWith('household-123', { status: HouseholdStatus.ACTIVE });
+      expect(result).toEqual(household);
     });
 
     it('should deactivate household', async () => {
-      jest.spyOn(service, 'update').mockResolvedValue({} as any);
+      const household = { id: 'household-123', status: HouseholdStatus.INACTIVE };
+      mockRepository.findByName.mockResolvedValue(null);
+      mockRepository.update.mockResolvedValue(household as any);
 
-      await service.deactivate('household-123');
+      const result = await service.deactivate('household-123');
 
-      expect(service.update).toHaveBeenCalledWith('household-123', { status: HouseholdStatus.INACTIVE });
+      expect(mockRepository.update).toHaveBeenCalledWith('household-123', { status: HouseholdStatus.INACTIVE });
+      expect(result).toEqual(household);
     });
 
     it('should suspend household', async () => {
-      jest.spyOn(service, 'update').mockResolvedValue({} as any);
+      const household = { id: 'household-123', status: HouseholdStatus.SUSPENDED };
+      mockRepository.findByName.mockResolvedValue(null);
+      mockRepository.update.mockResolvedValue(household as any);
 
-      await service.suspend('household-123');
+      const result = await service.suspend('household-123');
 
-      expect(service.update).toHaveBeenCalledWith('household-123', { status: HouseholdStatus.SUSPENDED });
+      expect(mockRepository.update).toHaveBeenCalledWith('household-123', { status: HouseholdStatus.SUSPENDED });
+      expect(result).toEqual(household);
     });
   });
 });

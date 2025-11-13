@@ -1,0 +1,328 @@
+{
+  "realm": "hfp",
+  "displayName": "Household Financial Platform",
+  "displayNameHtml": "<strong>HFP</strong>",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 30,
+  "defaultRoles": ["default-roles-hfp", "offline_access", "uma_authorization"],
+  "requiredCredentials": ["password"],
+  "passwordPolicy": "length(8)",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA256",
+  "otpPolicyInitialCounter": 0,
+  "otpPolicyDigits": 6,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyPeriod": 30,
+  "supportedLocales": ["en", "es", "fr"],
+  "defaultLocale": "en",
+  "internationalizationEnabled": true,
+  "clients": [
+    {
+      "clientId": "hfp-backend",
+      "name": "HFP Backend Service",
+      "description": "Backend service client for HFP API",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "hfp-backend-secret-change-in-production",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "protocolMappers": [
+        {
+          "name": "household-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "household_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "household_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "hfp-role-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "hfp_role",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "hfp_role",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "email-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "email",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "email",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "preferred-username-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "username",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String"
+          }
+        }
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ]
+    },
+    {
+      "clientId": "hfp-frontend",
+      "name": "HFP Frontend Application",
+      "description": "Frontend React application for HFP",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:5173/*",
+        "https://hfp.yourdomain.com/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://hfp.yourdomain.com"
+      ],
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "household-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "household_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "household_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "hfp-role-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "hfp_role",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "hfp_role",
+            "jsonType.label": "String"
+          }
+        }
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access"
+      ]
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "hfp-user",
+        "description": "Basic HFP user role"
+      },
+      {
+        "name": "household-viewer",
+        "description": "Can view household data"
+      },
+      {
+        "name": "household-member",
+        "description": "Can manage own data within household"
+      },
+      {
+        "name": "household-admin",
+        "description": "Can manage household and its members"
+      },
+      {
+        "name": "system-admin",
+        "description": "System administrator with full access"
+      }
+    ]
+  },
+  "groups": [
+    {
+      "name": "household-admins",
+      "path": "/household-admins",
+      "realmRoles": ["household-admin"]
+    },
+    {
+      "name": "household-members",
+      "path": "/household-members",
+      "realmRoles": ["household-member"]
+    },
+    {
+      "name": "household-viewers",
+      "path": "/household-viewers",
+      "realmRoles": ["household-viewer"]
+    }
+  ],
+  "scopeMappings": [
+    {
+      "client": "hfp-backend",
+      "roles": ["hfp-user", "household-viewer", "household-member", "household-admin", "system-admin"]
+    },
+    {
+      "client": "hfp-frontend",
+      "roles": ["hfp-user", "household-viewer", "household-member", "household-admin"]
+    }
+  ],
+  "clientScopeMappings": {
+    "account": [
+      {
+        "client": "hfp-backend",
+        "roles": ["manage-account", "view-profile"]
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin@hfp.com",
+      "enabled": true,
+      "email": "admin@hfp.com",
+      "emailVerified": true,
+      "firstName": "System",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["system-admin", "hfp-user"],
+      "attributes": {
+        "household_id": ["system"],
+        "hfp_role": ["system-admin"]
+      }
+    },
+    {
+      "username": "demo@household1.com",
+      "enabled": true,
+      "email": "demo@household1.com",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["household-admin", "hfp-user"],
+      "attributes": {
+        "household_id": ["550e8400-e29b-41d4-a716-446655440001"],
+        "hfp_role": ["household-admin"]
+      }
+    },
+    {
+      "username": "member@household1.com",
+      "enabled": true,
+      "email": "member@household1.com",
+      "emailVerified": true,
+      "firstName": "Member",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["household-member", "hfp-user"],
+      "attributes": {
+        "household_id": ["550e8400-e29b-41d4-a716-446655440001"],
+        "hfp_role": ["household-member"]
+      }
+    }
+  ],
+  "userFederationProviders": [],
+  "userFederationMappers": [],
+  "identityProviders": [],
+  "identityProviderMappers": [],
+  "browserFlow": "browser",
+  "registrationFlow": "registration",
+  "directGrantFlow": "direct grant",
+  "resetCredentialsFlow": "reset credentials",
+  "clientAuthenticationFlow": "clients",
+  "dockerAuthenticationFlow": "docker auth",
+  "attributes": {
+    "frontendUrl": "http://localhost:8080/",
+    "userManagedAccessAllowed": "false",
+    "clientOfflineSessionIdleTimeout": "0",
+    "clientOfflineSessionMaxLifespan": "0"
+  },
+  "keycloakVersion": "23.0.0",
+  "userManagedAccessAllowed": false
+}

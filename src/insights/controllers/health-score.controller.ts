@@ -20,12 +20,12 @@ import {
   HealthScoreDto,
   HealthScoreHistoryDto,
 } from '../dto';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { KeycloakAuthGuard } from '../../auth/guards/keycloak-auth.guard';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 
 @ApiTags('health-score')
 @Controller('health-score')
-@UseGuards(JwtAuthGuard, HouseholdGuard)
+@UseGuards(KeycloakAuthGuard, HouseholdGuard)
 @ApiBearerAuth()
 export class HealthScoreController {
   constructor(

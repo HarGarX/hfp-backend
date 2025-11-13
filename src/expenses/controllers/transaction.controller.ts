@@ -27,7 +27,7 @@ import {
   ApiNotFoundResponse,
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { KeycloakAuthGuard } from '../../auth/guards/keycloak-auth.guard';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { RequireRole } from '../../auth/decorators/roles.decorator';
@@ -40,7 +40,7 @@ import { Transaction, TransactionType, TransactionStatus } from '../entities/tra
 
 @ApiTags('Transactions')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard, HouseholdGuard, RolesGuard)
+@UseGuards(KeycloakAuthGuard, HouseholdGuard, RolesGuard)
 @Controller('transactions')
 export class TransactionController {
   constructor(private readonly transactionService: TransactionService) {}

@@ -29,24 +29,20 @@ import {
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
 import { HouseholdsService } from './households.service';
-import type { HouseholdQueryOptions } from './households.service';
+import type { HouseholdQueryOptions } from './repositories/household.repository';
 import { CreateHouseholdDto } from './dto/create-household.dto';
 import { UpdateHouseholdDto } from './dto/update-household.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { KeycloakAuthGuard } from '../auth/guards/keycloak-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { RequireRole } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { RequireHouseholdAdmin, RequireHouseholdMember, RequireSystemAdmin, RequireRoles, UserRole } from '../../libs/auth-placeholder';
+import { HouseholdScoped } from '../../libs/tenant';
 
 @ApiTags('Households')
 @ApiBearerAuth('JWT-auth')
 @Controller('households')
-@UseGuards(JwtAuthGuard, RolesGuard)
 export class HouseholdsController {
   constructor(private readonly householdsService: HouseholdsService) {}
 
   @Post()
-  @RequireRole(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
+  @RequireRoles(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a new household',
@@ -73,7 +69,7 @@ export class HouseholdsController {
   }
 
   @Get()
-  @RequireRole(UserRole.ADMIN) // Only system admins can list all households
+  @RequireRoles(UserRole.ADMIN) // Only system admins can list all households
   @ApiOperation({
     summary: 'Get all households',
     description: 'Retrieve a paginated list of all households. Only system administrators can access this endpoint.'
@@ -125,6 +121,7 @@ export class HouseholdsController {
   }
 
   @Get(':id')
+  @HouseholdScoped() // Ensures this endpoint requires household context
   @ApiOperation({
     summary: 'Get household details',
     description: 'Retrieve detailed information about a specific household. Users can only access households they belong to.'
@@ -196,7 +193,7 @@ export class HouseholdsController {
   }
 
   @Patch(':id')
-  @RequireRole(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
+  @RequireRoles(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
   @ApiOperation({
     summary: 'Update household',
     description: 'Update household information. Only system admins and household admins can update households.'
@@ -227,7 +224,7 @@ export class HouseholdsController {
   }
 
   @Patch(':id/activate')
-  @RequireRole(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
+  @RequireRoles(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Activate household',
@@ -243,7 +240,7 @@ export class HouseholdsController {
   }
 
   @Patch(':id/deactivate')
-  @RequireRole(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
+  @RequireRoles(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Deactivate household',
@@ -259,7 +256,7 @@ export class HouseholdsController {
   }
 
   @Patch(':id/suspend')
-  @RequireRole(UserRole.ADMIN)
+  @RequireRoles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Suspend household',
@@ -275,7 +272,7 @@ export class HouseholdsController {
   }
 
   @Delete(':id')
-  @RequireRole(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
+  @RequireRoles(UserRole.ADMIN, UserRole.HOUSEHOLD_ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete household',

@@ -109,6 +109,13 @@ export class UserSyncService {
 
   private mapKeycloakRoleToUserRole(keycloakRole: string): UserRole {
     const roleMapping: Record<string, UserRole> = {
+      // Keycloak realm roles to HFP roles
+      'system-admin': UserRole.ADMIN,
+      'household-admin': UserRole.ADMIN,
+      'household-member': UserRole.MEMBER,
+      'household-viewer': UserRole.VIEWER,
+      'hfp-user': UserRole.MEMBER,
+      // Legacy mappings
       'hfp_admin': UserRole.ADMIN,
       'hfp_member': UserRole.MEMBER,
       'hfp_viewer': UserRole.VIEWER,

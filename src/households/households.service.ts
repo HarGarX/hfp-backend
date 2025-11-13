@@ -1,123 +1,66 @@
 import { Injectable, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindOptionsWhere } from 'typeorm';
+import { HouseholdRepository, HouseholdQueryOptions, PaginatedHouseholds } from './repositories/household.repository';
 import { Household, HouseholdStatus } from './entities/household.entity';
 import { CreateHouseholdDto } from './dto/create-household.dto';
 import { UpdateHouseholdDto } from './dto/update-household.dto';
-
-export interface HouseholdQueryOptions {
-  search?: string;
-  status?: HouseholdStatus;
-  page?: number;
-  limit?: number;
-}
-
-export interface PaginatedHouseholds {
-  households: Household[];
-  total: number;
-  page: number;
-  totalPages: number;
-}
+import { TenantContextService } from '../../libs/tenant';
 
 @Injectable()
 export class HouseholdsService {
   constructor(
-    @InjectRepository(Household)
-    private householdsRepository: Repository<Household>,
+    private readonly householdRepository: HouseholdRepository,
+    private readonly tenantContextService: TenantContextService,
   ) {}
 
   async create(createHouseholdDto: CreateHouseholdDto, createdBy?: string): Promise<Household> {
     // Check if household with same name already exists
-    const existingHousehold = await this.householdsRepository.findOne({
-      where: { name: createHouseholdDto.name }
-    });
+    const existingHousehold = await this.householdRepository.findByName(createHouseholdDto.name);
 
     if (existingHousehold) {
       throw new ConflictException('Household with this name already exists');
     }
 
-    const household = this.householdsRepository.create({
+    const householdData = {
       ...createHouseholdDto,
       status: createHouseholdDto.status || HouseholdStatus.ACTIVE,
       default_currency: createHouseholdDto.default_currency || 'USD',
       member_count: 0,
       total_income: 0,
       total_expenses: 0,
-    });
+    };
 
-    return this.householdsRepository.save(household);
+    return this.householdRepository.create(householdData);
   }
 
   async findAll(options: HouseholdQueryOptions = {}): Promise<PaginatedHouseholds> {
-    const { search, status, page = 1, limit = 10 } = options;
-    
-    const queryBuilder = this.householdsRepository.createQueryBuilder('household');
-    
-    // Add search functionality
-    if (search) {
-      queryBuilder.where(
-        '(household.name ILIKE :search OR household.description ILIKE :search)',
-        { search: `%${search}%` }
-      );
-    }
-
-    // Filter by status
-    if (status) {
-      queryBuilder.andWhere('household.status = :status', { status });
-    }
-
-    // Add pagination
-    const skip = (page - 1) * limit;
-    queryBuilder.skip(skip).take(limit);
-
-    // Order by created_at desc
-    queryBuilder.orderBy('household.created_at', 'DESC');
-
-    // Load relations
-    queryBuilder.leftJoinAndSelect('household.users', 'users');
-
-    const [households, total] = await queryBuilder.getManyAndCount();
-
-    return {
-      households,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
-    };
+    return this.householdRepository.findAllPaginated(options);
   }
 
   async findOne(id: string, userId?: string): Promise<Household> {
-    const queryBuilder = this.householdsRepository.createQueryBuilder('household')
-      .where('household.id = :id', { id })
-      .leftJoinAndSelect('household.users', 'users');
-
-    const household = await queryBuilder.getOne();
+    const household = await this.householdRepository.findById(id);
 
     if (!household) {
-      throw new NotFoundException(`Household with ID ${id} not found`);
+      throw new NotFoundException('Household not found');
     }
 
     return household;
   }
 
   async update(id: string, updateHouseholdDto: UpdateHouseholdDto, userId?: string): Promise<Household> {
-    const household = await this.findOne(id, userId);
-
     // Check if trying to update name and it conflicts with existing
-    if (updateHouseholdDto.name && updateHouseholdDto.name !== household.name) {
-      const existingHousehold = await this.householdsRepository.findOne({
-        where: { name: updateHouseholdDto.name }
-      });
-
-      if (existingHousehold) {
+    if (updateHouseholdDto.name) {
+      const existingHousehold = await this.householdRepository.findByName(updateHouseholdDto.name);
+      if (existingHousehold && existingHousehold.id !== id) {
         throw new ConflictException('Household with this name already exists');
       }
     }
 
-    // Update household
-    Object.assign(household, updateHouseholdDto);
-    
-    return this.householdsRepository.save(household);
+    const updatedHousehold = await this.householdRepository.update(id, updateHouseholdDto);
+    if (!updatedHousehold) {
+      throw new NotFoundException('Household not found or access denied');
+    }
+
+    return updatedHousehold;
   }
 
   async remove(id: string, userId?: string): Promise<void> {
@@ -128,16 +71,14 @@ export class HouseholdsService {
       throw new ConflictException('Cannot delete household with active members. Remove all members first.');
     }
 
-    // Soft delete
-    await this.householdsRepository.softDelete(id);
+    const deleted = await this.householdRepository.softDelete(id);
+    if (!deleted) {
+      throw new ForbiddenException('Access denied or household not found');
+    }
   }
 
-  async updateMemberCount(householdId: string, increment: number = 1): Promise<void> {
-    await this.householdsRepository.increment(
-      { id: householdId }, 
-      'member_count', 
-      increment
-    );
+  async updateMemberCount(householdId: string): Promise<void> {
+    await this.householdRepository.updateMemberCount(householdId);
   }
 
   async updateFinancials(
@@ -156,7 +97,10 @@ export class HouseholdsService {
     }
 
     if (Object.keys(updateData).length > 0) {
-      await this.householdsRepository.update(householdId, updateData);
+      const updated = await this.householdRepository.update(householdId, updateData);
+      if (!updated) {
+        throw new NotFoundException('Household not found or access denied');
+      }
     }
   }
 
@@ -188,5 +132,9 @@ export class HouseholdsService {
 
   async suspend(householdId: string): Promise<Household> {
     return this.update(householdId, { status: HouseholdStatus.SUSPENDED });
+  }
+
+  async getStatistics() {
+    return this.householdRepository.getStatistics();
   }
 }

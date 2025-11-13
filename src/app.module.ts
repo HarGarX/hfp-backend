@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CoreModule, AppConfigService } from '../libs/core';
+import { TenantModule } from '../libs/tenant';
+import { AuthModule } from '../libs/auth-placeholder';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { AuthModule } from './auth/auth.module';
 import { HouseholdsModule } from './households/households.module';
 import { UsersModule } from './users/users.module';
 import { AccountsModule } from './accounts/accounts.module';
@@ -14,6 +15,7 @@ import { InsightsModule } from './insights/insights.module';
 import { SimulationsModule } from './simulations/simulations.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SharedModule } from './shared/shared.module';
+import { SecurityTestModule } from './security-test/security-test.module';
 import { Household } from './households/entities/household.entity';
 import { User } from './users/entities/user.entity';
 import { Account } from './accounts/entities/account.entity';
@@ -31,24 +33,15 @@ import { NotificationTemplate } from './notifications/entities/notification-temp
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: '.env',
-    }),
+    CoreModule,
+    TenantModule,
     TypeOrmModule.forRootAsync({
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
+      useFactory: (configService: AppConfigService) => ({
         type: 'postgres',
-        host: configService.get('DB_HOST'),
-        port: +configService.get('DB_PORT'),
-        username: configService.get('DB_USERNAME'),
-        password: configService.get('DB_PASSWORD'),
-        database: configService.get('DB_NAME'),
+        ...configService.database,
         entities: [Household, User, Account, Transaction, Category, Goal, GoalActivity, Loan, LoanPayment, Insight, FinancialHealthScore, Notification, NotificationPreferences, NotificationTemplate],
-        synchronize: false, // Use migrations instead
-        logging: configService.get('NODE_ENV') === 'development',
       }),
-      inject: [ConfigService],
+      inject: [AppConfigService],
     }),
     AuthModule, 
     HouseholdsModule, 
@@ -60,6 +53,7 @@ import { NotificationTemplate } from './notifications/entities/notification-temp
     InsightsModule, 
     SimulationsModule, 
     NotificationsModule, 
+    SecurityTestModule,
     SharedModule
   ],
   controllers: [AppController],

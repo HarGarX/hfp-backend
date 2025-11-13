@@ -15,7 +15,6 @@ import {
 import { AuthService } from './auth.service';
 import { KeycloakService } from './keycloak.service';
 import { KeycloakAuthGuard } from './guards/keycloak-auth.guard';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import type { LoginResponse } from './auth.service';
@@ -230,7 +229,7 @@ export class AuthController {
   }
 
   @Get('profile')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(KeycloakAuthGuard)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get current user profile',
