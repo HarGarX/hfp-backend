@@ -26,13 +26,13 @@ import {
   AcknowledgeInsightDto,
 } from '../dto';
 import { PaginationDto } from '../../shared/dto/pagination.dto';
-import { KeycloakAuthGuard } from '../../auth/guards/keycloak-auth.guard';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { Insight } from '../entities/insight.entity';
 
 @ApiTags('insights')
 @Controller('insights')
-@UseGuards(KeycloakAuthGuard, HouseholdGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 @ApiBearerAuth()
 export class InsightsController {
   constructor(private readonly insightsService: InsightsService) {}

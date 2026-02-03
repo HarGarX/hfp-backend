@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bull';
 import { CoreModule, AppConfigService } from '../libs/core';
 import { TenantModule } from '../libs/tenant';
-import { AuthModule } from '../libs/auth-placeholder';
+import { AuthModule } from './auth/auth.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HouseholdsModule } from './households/households.module';
@@ -14,6 +15,8 @@ import { GoalsModule } from './goals/goals.module';
 import { InsightsModule } from './insights/insights.module';
 import { SimulationsModule } from './simulations/simulations.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
+import { JobsModule } from './jobs/jobs.module';
 import { SharedModule } from './shared/shared.module';
 import { SecurityTestModule } from './security-test/security-test.module';
 import { Household } from './households/entities/household.entity';
@@ -30,6 +33,9 @@ import { FinancialHealthScore } from './insights/entities/financial-health-score
 import { Notification } from './notifications/entities/notification.entity';
 import { NotificationPreferences } from './notifications/entities/notification-preferences.entity';
 import { NotificationTemplate } from './notifications/entities/notification-template.entity';
+import { OnboardingStatus } from './onboarding/entities/onboarding-status.entity';
+import { Simulation } from './simulations/entities/simulation.entity';
+import { ScenarioRun } from './simulations/entities/scenario-run.entity';
 
 @Module({
   imports: [
@@ -39,7 +45,17 @@ import { NotificationTemplate } from './notifications/entities/notification-temp
       useFactory: (configService: AppConfigService) => ({
         type: 'postgres',
         ...configService.database,
-        entities: [Household, User, Account, Transaction, Category, Goal, GoalActivity, Loan, LoanPayment, Insight, FinancialHealthScore, Notification, NotificationPreferences, NotificationTemplate],
+        entities: [Household, User, Account, Transaction, Category, Goal, GoalActivity, Loan, LoanPayment, Insight, FinancialHealthScore, Notification, NotificationPreferences, NotificationTemplate, OnboardingStatus, Simulation, ScenarioRun],
+      }),
+      inject: [AppConfigService],
+    }),
+    BullModule.forRootAsync({
+      useFactory: (configService: AppConfigService) => ({
+        redis: {
+          host: configService.redis.host,
+          port: configService.redis.port,
+          password: configService.redis.password,
+        },
       }),
       inject: [AppConfigService],
     }),
@@ -53,6 +69,8 @@ import { NotificationTemplate } from './notifications/entities/notification-temp
     InsightsModule, 
     SimulationsModule, 
     NotificationsModule, 
+    OnboardingModule,
+    JobsModule,
     SecurityTestModule,
     SharedModule
   ],

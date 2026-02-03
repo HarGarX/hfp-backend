@@ -42,7 +42,8 @@ export class RequestValidationMiddleware implements NestMiddleware {
     const userId = req.headers['x-user-id'] as string;
 
     // Skip validation for public routes
-    if (req.url.startsWith('/health') || req.url.startsWith('/metrics')) {
+    if (req.url.startsWith('/health') || req.url.startsWith('/metrics') || 
+        req.url.startsWith('/api') || req.url.startsWith('/api-json')) {
       return;
     }
 
@@ -62,11 +63,13 @@ export class RequestValidationMiddleware implements NestMiddleware {
       }
     }
 
-    // Validate Content-Type for POST/PUT/PATCH
+    // Validate Content-Type for POST/PUT/PATCH (allow multipart for file uploads)
     if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
       const contentType = req.headers['content-type'];
-      if (!contentType?.includes('application/json')) {
-        throw new BadRequestException('Content-Type must be application/json for this request');
+      if (contentType && !contentType.includes('application/json') && 
+          !contentType.includes('multipart/form-data') && 
+          !contentType.includes('application/x-www-form-urlencoded')) {
+        throw new BadRequestException('Content-Type must be application/json, multipart/form-data, or application/x-www-form-urlencoded');
       }
     }
   }

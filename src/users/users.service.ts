@@ -2,29 +2,8 @@ import { Injectable, NotFoundException, ConflictException, ForbiddenException } 
 import { UserRepository, UserQueryOptions, PaginatedUsers } from './repositories/user.repository';
 import { User, UserRole } from './entities/user.entity';
 import { TenantContextService } from '../../libs/tenant';
+import { CreateUserDto, UpdateUserDto, ChangePasswordDto } from './dto';
 import * as bcrypt from 'bcrypt';
-
-export interface CreateUserDto {
-  email: string;
-  first_name: string;
-  last_name: string;
-  password?: string;
-  role?: UserRole;
-  is_active?: boolean;
-  household_id?: string;
-}
-
-export interface UpdateUserDto {
-  first_name?: string;
-  last_name?: string;
-  role?: UserRole;
-  is_active?: boolean;
-}
-
-export interface ChangePasswordDto {
-  currentPassword: string;
-  newPassword: string;
-}
 
 @Injectable()
 export class UsersService {
@@ -81,10 +60,6 @@ export class UsersService {
 
   async findByEmail(email: string): Promise<User | null> {
     return this.userRepository.findByEmail(email);
-  }
-
-  async findByKeycloakId(keycloakId: string): Promise<User | null> {
-    return this.userRepository.findByKeycloakId(keycloakId);
   }
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {

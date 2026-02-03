@@ -6,7 +6,8 @@ import {
   Patch, 
   Param, 
   Delete, 
-  UseGuards, 
+  UseGuards,
+  UseInterceptors,
   Request,
   Query,
   ParseUUIDPipe,
@@ -34,9 +35,13 @@ import { CreateHouseholdDto } from './dto/create-household.dto';
 import { UpdateHouseholdDto } from './dto/update-household.dto';
 import { RequireHouseholdAdmin, RequireHouseholdMember, RequireSystemAdmin, RequireRoles, UserRole } from '../../libs/auth-placeholder';
 import { HouseholdScoped } from '../../libs/tenant';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from '../shared/interceptors/tenant-context.interceptor';
 
 @ApiTags('Households')
-@ApiBearerAuth('JWT-auth')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@UseInterceptors(TenantContextInterceptor)
 @Controller('households')
 export class HouseholdsController {
   constructor(private readonly householdsService: HouseholdsService) {}

@@ -5,11 +5,10 @@ import {
   ConflictException,
   BadRequestException 
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindOptionsWhere } from 'typeorm';
 import { Account, AccountType, AccountStatus } from './entities/account.entity';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
+import { AccountsRepository } from './repositories/accounts.repository';
 
 export interface AccountQueryOptions {
   search?: string;
@@ -38,8 +37,7 @@ export interface AccountSummary {
 @Injectable()
 export class AccountsService {
   constructor(
-    @InjectRepository(Account)
-    private accountsRepository: Repository<Account>,
+    private accountsRepository: AccountsRepository,
   ) {}
 
   async create(
@@ -48,10 +46,9 @@ export class AccountsService {
     userId?: string
   ): Promise<Account> {
     // Check for duplicate account name within household
-    const existingAccount = await this.accountsRepository.findOne({
+    const existingAccount = await this.accountsRepository.findOneWithHousehold(householdId, {
       where: { 
         name: createAccountDto.name,
-        household_id: householdId,
         is_active: true
       }
     });
@@ -80,7 +77,7 @@ export class AccountsService {
       created_by: userId,
     });
 
-    return this.accountsRepository.save(account);
+    return this.accountsRepository.saveWithHousehold(householdId, account);
   }
 
   async findAll(
@@ -97,8 +94,7 @@ export class AccountsService {
       limit = 10 
     } = options;
     
-    const queryBuilder = this.accountsRepository.createQueryBuilder('account')
-      .where('account.household_id = :householdId', { householdId })
+    const queryBuilder = this.accountsRepository.createQueryBuilderWithHousehold(householdId, 'account')
       .andWhere('account.is_active = :isActive', { isActive: true });
     
     // Add search functionality
@@ -150,10 +146,9 @@ export class AccountsService {
   }
 
   async findOne(id: string, householdId: string): Promise<Account> {
-    const account = await this.accountsRepository.findOne({
+    const account = await this.accountsRepository.findOneWithHousehold(householdId, {
       where: { 
-        id, 
-        household_id: householdId,
+        id,
         is_active: true
       },
       relations: ['creator'],
@@ -176,10 +171,9 @@ export class AccountsService {
 
     // Check for name conflict if updating name
     if (updateAccountDto.name && updateAccountDto.name !== account.name) {
-      const existingAccount = await this.accountsRepository.findOne({
+      const existingAccount = await this.accountsRepository.findOneWithHousehold(householdId, {
         where: { 
           name: updateAccountDto.name,
-          household_id: householdId,
           is_active: true
         }
       });
@@ -202,7 +196,7 @@ export class AccountsService {
     // Update account
     Object.assign(account, updateAccountDto);
     
-    return this.accountsRepository.save(account);
+    return this.accountsRepository.saveWithHousehold(householdId, account);
   }
 
   async remove(id: string, householdId: string): Promise<void> {
@@ -210,7 +204,7 @@ export class AccountsService {
 
     // Soft delete
     account.is_active = false;
-    await this.accountsRepository.save(account);
+    await this.accountsRepository.saveWithHousehold(householdId, account);
   }
 
   async updateBalance(
@@ -225,13 +219,12 @@ export class AccountsService {
     account.available_balance = availableBalance ?? currentBalance;
     account.last_synced_at = new Date();
 
-    return this.accountsRepository.save(account);
+    return this.accountsRepository.saveWithHousehold(householdId, account);
   }
 
   async getAccountSummary(householdId: string): Promise<AccountSummary> {
-    const accounts = await this.accountsRepository.find({
+    const accounts = await this.accountsRepository.findWithHousehold(householdId, {
       where: { 
-        household_id: householdId,
         is_active: true,
         status: AccountStatus.ACTIVE
       }
@@ -260,19 +253,19 @@ export class AccountsService {
   async activateAccount(id: string, householdId: string): Promise<Account> {
     const account = await this.findOne(id, householdId);
     account.status = AccountStatus.ACTIVE;
-    return this.accountsRepository.save(account);
+    return this.accountsRepository.saveWithHousehold(householdId, account);
   }
 
   async closeAccount(id: string, householdId: string): Promise<Account> {
     const account = await this.findOne(id, householdId);
     account.status = AccountStatus.CLOSED;
     account.closing_date = new Date();
-    return this.accountsRepository.save(account);
+    return this.accountsRepository.saveWithHousehold(householdId, account);
   }
 
   async suspendAccount(id: string, householdId: string): Promise<Account> {
     const account = await this.findOne(id, householdId);
     account.status = AccountStatus.SUSPENDED;
-    return this.accountsRepository.save(account);
+    return this.accountsRepository.saveWithHousehold(householdId, account);
   }
 }

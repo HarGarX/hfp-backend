@@ -27,7 +27,7 @@ import {
   ApiNotFoundResponse,
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
-import { KeycloakAuthGuard } from '../auth/guards/keycloak-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../shared/guards/household.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { RequireRole } from '../auth/decorators/roles.decorator';
@@ -41,8 +41,8 @@ import { Account, AccountType, AccountStatus } from './entities/account.entity';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('Accounts')
-@ApiBearerAuth('JWT-auth')
-@UseGuards(KeycloakAuthGuard, HouseholdGuard, RolesGuard)
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, HouseholdGuard, RolesGuard)
 @Controller('accounts')
 export class AccountsController {
   constructor(private readonly accountsService: AccountsService) {}

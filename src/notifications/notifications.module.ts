@@ -16,6 +16,10 @@ import { NotificationsController } from './controllers/notifications.controller'
 import { NotificationPreferencesController } from './controllers/notification-preferences.controller';
 import { NotificationTemplatesController } from './controllers/notification-templates.controller';
 
+// Repositories
+import { NotificationRepository } from './repositories/notification.repository';
+import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -33,6 +37,8 @@ import { NotificationTemplatesController } from './controllers/notification-temp
     NotificationsService,
     NotificationPreferencesService,
     NotificationTemplateService,
+    NotificationRepository,
+    NotificationPreferencesRepository,
   ],
   exports: [
     NotificationsService,

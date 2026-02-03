@@ -3,8 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThan, MoreThan } from 'typeorm';
+import { Between, LessThan, MoreThan } from 'typeorm';
 import { Insight, InsightType, InsightStatus, InsightPriority } from '../entities/insight.entity';
 import { FinancialHealthScore, HealthScoreCategory } from '../entities/financial-health-score.entity';
 import {
@@ -23,23 +22,25 @@ import { Account } from '../../accounts/entities/account.entity';
 import { Goal } from '../../goals/entities/goal.entity';
 import { Loan } from '../../loans/entities/loan.entity';
 
+// Import repositories
+import { InsightRepository } from '../repositories/insight.repository';
+import { FinancialHealthScoreRepository } from '../repositories/financial-health-score.repository';
+import { TransactionRepository } from '../../expenses/repositories/transaction.repository';
+import { CategoryRepository } from '../../expenses/repositories/category.repository';
+import { AccountsRepository } from '../../accounts/repositories/accounts.repository';
+import { GoalRepository } from '../../goals/repositories/goal.repository';
+import { LoanRepository } from '../../loans/repositories/loan.repository';
+
 @Injectable()
 export class InsightsService {
   constructor(
-    @InjectRepository(Insight)
-    private readonly insightRepository: Repository<Insight>,
-    @InjectRepository(FinancialHealthScore)
-    private readonly healthScoreRepository: Repository<FinancialHealthScore>,
-    @InjectRepository(Transaction)
-    private readonly transactionRepository: Repository<Transaction>,
-    @InjectRepository(Category)
-    private readonly categoryRepository: Repository<Category>,
-    @InjectRepository(Account)
-    private readonly accountRepository: Repository<Account>,
-    @InjectRepository(Goal)
-    private readonly goalRepository: Repository<Goal>,
-    @InjectRepository(Loan)
-    private readonly loanRepository: Repository<Loan>,
+    private readonly insightRepository: InsightRepository,
+    private readonly healthScoreRepository: FinancialHealthScoreRepository,
+    private readonly transactionRepository: TransactionRepository,
+    private readonly categoryRepository: CategoryRepository,
+    private readonly accountRepository: AccountsRepository,
+    private readonly goalRepository: GoalRepository,
+    private readonly loanRepository: LoanRepository,
   ) {}
 
   async create(
@@ -53,7 +54,7 @@ export class InsightsService {
       user_id: createInsightDto.user_id || userId,
     });
 
-    return await this.insightRepository.save(insight);
+    return await this.insightRepository.saveWithHousehold(householdId, insight);
   }
 
   async findAll(
@@ -62,9 +63,8 @@ export class InsightsService {
     filters?: InsightFiltersDto,
   ): Promise<{ insights: Insight[]; total: number }> {
     const queryBuilder = this.insightRepository
-      .createQueryBuilder('insight')
-      .leftJoinAndSelect('insight.user', 'user')
-      .where('insight.household_id = :householdId', { householdId });
+      .createQueryBuilderWithHousehold(householdId, 'insight')
+      .leftJoinAndSelect('insight.user', 'user');
 
     // Apply filters
     if (filters?.type) {
@@ -122,10 +122,13 @@ export class InsightsService {
   }
 
   async findOne(id: string, householdId: string): Promise<Insight> {
-    const insight = await this.insightRepository.findOne({
-      where: { id, household_id: householdId },
-      relations: ['user'],
-    });
+    const insight = await this.insightRepository.findOneWithHousehold(
+      householdId,
+      {
+        where: { id },
+        relations: ['user'],
+      },
+    );
 
     if (!insight) {
       throw new NotFoundException('Insight not found');
@@ -134,7 +137,7 @@ export class InsightsService {
     // Track view
     insight.view_count += 1;
     insight.last_viewed_at = new Date();
-    await this.insightRepository.save(insight);
+    await this.insightRepository.saveWithHousehold(householdId, insight);
 
     return insight;
   }
@@ -148,7 +151,7 @@ export class InsightsService {
 
     Object.assign(insight, updateInsightDto);
 
-    return await this.insightRepository.save(insight);
+    return await this.insightRepository.saveWithHousehold(householdId, insight);
   }
 
   async acknowledge(
@@ -174,7 +177,7 @@ export class InsightsService {
       };
     }
 
-    return await this.insightRepository.save(insight);
+    return await this.insightRepository.saveWithHousehold(householdId, insight);
   }
 
   async dismiss(id: string, householdId: string): Promise<Insight> {
@@ -182,18 +185,16 @@ export class InsightsService {
     
     insight.status = InsightStatus.DISMISSED;
     
-    return await this.insightRepository.save(insight);
+    return await this.insightRepository.saveWithHousehold(householdId, insight);
   }
 
   async remove(id: string, householdId: string): Promise<void> {
     const insight = await this.findOne(id, householdId);
-    await this.insightRepository.remove(insight);
+    await this.insightRepository.removeWithHousehold(householdId, insight);
   }
 
   async getSummary(householdId: string): Promise<InsightSummaryDto> {
-    const insights = await this.insightRepository.find({
-      where: { household_id: householdId },
-    });
+    const insights = await this.insightRepository.findWithHousehold(householdId, {});
 
     const totalInsights = insights.length;
     const activeInsights = insights.filter(i => i.status === InsightStatus.ACTIVE).length;
@@ -286,9 +287,8 @@ export class InsightsService {
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
-    const transactions = await this.transactionRepository.find({
+    const transactions = await this.transactionRepository.findWithHousehold(householdId, {
       where: {
-        household_id: householdId,
         date: MoreThan(threeMonthsAgo),
       },
       relations: ['category'],
@@ -359,22 +359,24 @@ export class InsightsService {
     }
 
     // Save generated insights
-    return await this.insightRepository.save(insights);
+    if (insights.length > 0) {
+      return await this.insightRepository.saveWithHousehold(householdId, insights);
+    }
+    return [];
   }
 
   async generateBudgetRecommendations(householdId: string): Promise<Insight> {
     // Get financial data for analysis
     const [accounts, transactions, goals, loans] = await Promise.all([
-      this.accountRepository.find({ where: { household_id: householdId } }),
-      this.transactionRepository.find({
+      this.accountRepository.findWithHousehold(householdId, {}),
+      this.transactionRepository.findWithHousehold(householdId, {
         where: {
-          household_id: householdId,
           date: MoreThan(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)), // Last 90 days
         },
         relations: ['category'],
       }),
-      this.goalRepository.find({ where: { household_id: householdId } }),
-      this.loanRepository.find({ where: { household_id: householdId } }),
+      this.goalRepository.findWithHousehold(householdId, {}),
+      this.loanRepository.findWithHousehold(householdId, {}),
     ]);
 
     // Calculate current income and expenses
@@ -454,20 +456,19 @@ export class InsightsService {
       action_url: '/budget/create',
     });
 
-    return await this.insightRepository.save(insight);
+    return await this.insightRepository.saveWithHousehold(householdId, insight);
   }
 
   // Cleanup expired insights
   async cleanupExpiredInsights(): Promise<number> {
-    const result = await this.insightRepository.update(
-      {
-        expires_at: LessThan(new Date()),
-        status: InsightStatus.ACTIVE,
-      },
-      {
-        status: InsightStatus.EXPIRED,
-      }
-    );
+    // This method needs to work across all households, so we use raw update
+    const result = await this.insightRepository
+      .createQueryBuilder()
+      .update(Insight)
+      .set({ status: InsightStatus.EXPIRED })
+      .where('expires_at < :now', { now: new Date() })
+      .andWhere('status = :activeStatus', { activeStatus: InsightStatus.ACTIVE })
+      .execute();
 
     return result.affected || 0;
   }

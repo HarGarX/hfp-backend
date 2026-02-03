@@ -4,10 +4,9 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { Category, CategoryType } from '../entities/category.entity';
 import { CreateCategoryDto, UpdateCategoryDto } from '../dto';
+import { CategoryRepository } from '../repositories/category.repository';
 
 export interface CategoryQueryOptions {
   search?: string;
@@ -28,8 +27,7 @@ export interface CategoryWithStats {
 @Injectable()
 export class CategoryService {
   constructor(
-    @InjectRepository(Category)
-    private readonly categoryRepository: Repository<Category>,
+    private readonly categoryRepository: CategoryRepository,
   ) {}
 
   async create(
@@ -38,9 +36,8 @@ export class CategoryService {
     userId: string,
   ): Promise<Category> {
     // Check for duplicate category name within household
-    const existingCategory = await this.categoryRepository.findOne({
+    const existingCategory = await this.categoryRepository.findOneWithHousehold(householdId, {
       where: {
-        household_id: householdId,
         name: createCategoryDto.name,
       },
     });
@@ -51,9 +48,10 @@ export class CategoryService {
 
     // Validate parent category if provided
     if (createCategoryDto.parent_id) {
-      const parentCategory = await this.categoryRepository.findOne({
-        where: { id: createCategoryDto.parent_id, household_id: householdId },
-      });
+      const parentCategory = await this.categoryRepository.findByIdWithHousehold(
+        householdId,
+        createCategoryDto.parent_id,
+      );
 
       if (!parentCategory) {
         throw new NotFoundException('Parent category not found');
@@ -76,7 +74,7 @@ export class CategoryService {
       created_by: userId,
     });
 
-    return this.categoryRepository.save(category);
+    return this.categoryRepository.saveWithHousehold(householdId, category);
   }
 
   async findAll(
@@ -93,11 +91,10 @@ export class CategoryService {
     } = options;
 
     const query = this.categoryRepository
-      .createQueryBuilder('category')
+      .createQueryBuilderWithHousehold(householdId, 'category')
       .leftJoinAndSelect('category.subcategories', 'subcategories')
       .leftJoinAndSelect('category.parent', 'parent')
       .leftJoinAndSelect('category.created_by_user', 'user')
-      .where('category.household_id = :householdId', { householdId })
       .orderBy('category.sort_order', 'ASC')
       .addOrderBy('category.name', 'ASC');
 
@@ -143,8 +140,8 @@ export class CategoryService {
   }
 
   async findOne(id: string, householdId: string): Promise<Category> {
-    const category = await this.categoryRepository.findOne({
-      where: { id, household_id: householdId },
+    const category = await this.categoryRepository.findOneWithHousehold(householdId, {
+      where: { id },
       relations: ['subcategories', 'parent', 'created_by_user'],
     });
 
@@ -165,9 +162,8 @@ export class CategoryService {
 
     // Check for duplicate name if name is being updated
     if (updateCategoryDto.name && updateCategoryDto.name !== category.name) {
-      const existingCategory = await this.categoryRepository.findOne({
+      const existingCategory = await this.categoryRepository.findOneWithHousehold(householdId, {
         where: {
-          household_id: householdId,
           name: updateCategoryDto.name,
         },
       });
@@ -180,9 +176,10 @@ export class CategoryService {
     // Validate parent category if being updated
     if (updateCategoryDto.parent_id !== undefined) {
       if (updateCategoryDto.parent_id) {
-        const parentCategory = await this.categoryRepository.findOne({
-          where: { id: updateCategoryDto.parent_id, household_id: householdId },
-        });
+        const parentCategory = await this.categoryRepository.findByIdWithHousehold(
+          householdId,
+          updateCategoryDto.parent_id,
+        );
 
         if (!parentCategory) {
           throw new NotFoundException('Parent category not found');
@@ -207,15 +204,15 @@ export class CategoryService {
     }
 
     Object.assign(category, updateCategoryDto);
-    return this.categoryRepository.save(category);
+    return this.categoryRepository.saveWithHousehold(householdId, category);
   }
 
   async remove(id: string, householdId: string): Promise<void> {
     const category = await this.findOne(id, householdId);
 
     // Check if category has subcategories
-    const subcategoryCount = await this.categoryRepository.count({
-      where: { parent_id: id, household_id: householdId },
+    const subcategoryCount = await this.categoryRepository.countWithHousehold(householdId, {
+      where: { parent_id: id },
     });
 
     if (subcategoryCount > 0) {
@@ -229,9 +226,8 @@ export class CategoryService {
 
   async getHierarchy(householdId: string, categoryType?: CategoryType): Promise<Category[]> {
     const query = this.categoryRepository
-      .createQueryBuilder('category')
+      .createQueryBuilderWithHousehold(householdId, 'category')
       .leftJoinAndSelect('category.subcategories', 'subcategories')
-      .where('category.household_id = :householdId', { householdId })
       .andWhere('category.parent_id IS NULL')
       .andWhere('category.is_active = true')
       .orderBy('category.sort_order', 'ASC')
@@ -303,7 +299,7 @@ export class CategoryService {
         sort_order: i,
       });
 
-      const savedCategory = await this.categoryRepository.save(category);
+      const savedCategory = await this.categoryRepository.saveWithHousehold(householdId, category);
       categories.push(savedCategory);
     }
 

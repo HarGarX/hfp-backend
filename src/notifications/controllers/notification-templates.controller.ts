@@ -18,7 +18,7 @@ import {
   ApiQuery,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { KeycloakAuthGuard } from '../../auth/guards/keycloak-auth.guard';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { RequireRole } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '../../users/entities/user.entity';
@@ -38,7 +38,7 @@ import { TemplateStatus } from '../entities/notification-template.entity';
 @ApiTags('Notification Templates')
 @ApiBearerAuth()
 @Controller('notification-templates')
-@UseGuards(KeycloakAuthGuard, HouseholdGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 export class NotificationTemplatesController {
   constructor(
     private readonly templateService: NotificationTemplateService,

@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   UseGuards,
+  UseInterceptors,
   Query,
   ParseUUIDPipe,
   HttpCode,
@@ -29,13 +30,17 @@ import {
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import type { CreateUserDto, UpdateUserDto, ChangePasswordDto } from './users.service';
+import { CreateUserDto, UpdateUserDto, ChangePasswordDto } from './dto';
 import type { UserQueryOptions } from './repositories/user.repository';
 import { UserRole } from './entities/user.entity';
 import { HouseholdScoped } from '../../libs/tenant';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from '../shared/interceptors/tenant-context.interceptor';
 
 @ApiTags('Users')
-@ApiBearerAuth('JWT-auth')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@UseInterceptors(TenantContextInterceptor)
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}

@@ -15,8 +15,11 @@ export class LoggingInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const { method, url } = request;
-    const tenantId = request.headers['x-tenant-id'];
-    const userId = request.headers['x-user-id'];
+    
+    // Try to get tenant/user info from JWT (request.user) first, then fall back to headers
+    const user = request.user;
+    const tenantId = user?.household_id || request.headers['x-tenant-id'];
+    const userId = user?.id || request.headers['x-user-id'];
     
     const startTime = Date.now();
     

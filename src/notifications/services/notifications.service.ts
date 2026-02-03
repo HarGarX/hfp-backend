@@ -1,19 +1,18 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindOptionsWhere, Between, Like, In } from 'typeorm';
+import { FindOptionsWhere, Between, Like, In } from 'typeorm';
 import { Notification, NotificationStatus, NotificationPriority, NotificationChannel } from '../entities/notification.entity';
 import { NotificationPreferences } from '../entities/notification-preferences.entity';
 import { CreateNotificationDto, BulkCreateNotificationDto } from '../dto/create-notification.dto';
 import { UpdateNotificationDto, BulkUpdateNotificationsDto } from '../dto/update-notification.dto';
 import { QueryNotificationsDto } from '../dto/query-notifications.dto';
+import { NotificationRepository } from '../repositories/notification.repository';
+import { NotificationPreferencesRepository } from '../repositories/notification-preferences.repository';
 
 @Injectable()
 export class NotificationsService {
   constructor(
-    @InjectRepository(Notification)
-    private readonly notificationRepository: Repository<Notification>,
-    @InjectRepository(NotificationPreferences)
-    private readonly preferencesRepository: Repository<NotificationPreferences>,
+    private readonly notificationRepository: NotificationRepository,
+    private readonly preferencesRepository: NotificationPreferencesRepository,
   ) {}
 
   async create(
@@ -41,7 +40,7 @@ export class NotificationsService {
       status: NotificationStatus.PENDING,
     });
 
-    const savedNotification = await this.notificationRepository.save(notification);
+    const savedNotification = await this.notificationRepository.saveWithHousehold(householdId, notification);
 
     // If scheduled for immediate delivery, mark as ready for sending
     if (!notification.scheduled_at || notification.scheduled_at <= new Date()) {
@@ -125,9 +124,8 @@ export class NotificationsService {
 
     // Build query
     let query = this.notificationRepository
-      .createQueryBuilder('notification')
-      .leftJoinAndSelect('notification.user', 'user')
-      .where('notification.household_id = :householdId', { householdId });
+      .createQueryBuilderWithHousehold(householdId, 'notification')
+      .leftJoinAndSelect('notification.user', 'user');
 
     // Apply additional filters
     if (type) query.andWhere('notification.type = :type', { type });
@@ -207,10 +205,13 @@ export class NotificationsService {
   }
 
   async findOne(householdId: string, id: string): Promise<Notification> {
-    const notification = await this.notificationRepository.findOne({
-      where: { id, household_id: householdId },
-      relations: ['user'],
-    });
+    const notification = await this.notificationRepository.findOneWithHousehold(
+      householdId,
+      {
+        where: { id },
+        relations: ['user'],
+      },
+    );
 
     if (!notification) {
       throw new NotFoundException('Notification not found');
@@ -227,7 +228,7 @@ export class NotificationsService {
     const notification = await this.findOne(householdId, id);
 
     Object.assign(notification, updateNotificationDto);
-    return await this.notificationRepository.save(notification);
+    return await this.notificationRepository.saveWithHousehold(householdId, notification);
   }
 
   async remove(householdId: string, id: string): Promise<void> {
@@ -244,22 +245,21 @@ export class NotificationsService {
       notification.clicked_url = clickedUrl;
     }
 
-    return await this.notificationRepository.save(notification);
+    return await this.notificationRepository.saveWithHousehold(householdId, notification);
   }
 
   async markAllAsRead(householdId: string, userId?: string): Promise<void> {
-    const where: FindOptionsWhere<Notification> = {
-      household_id: householdId,
-      read_at: null as any, // TypeORM way to check for null
-    };
+    const qb = this.notificationRepository
+      .createQueryBuilderWithHousehold(householdId, 'notification')
+      .update(Notification)
+      .set({ read_at: new Date() })
+      .where('read_at IS NULL');
 
     if (userId) {
-      where.user_id = userId;
+      qb.andWhere('user_id = :userId', { userId });
     }
 
-    await this.notificationRepository.update(where, {
-      read_at: new Date(),
-    });
+    await qb.execute();
   }
 
   async updateStatus(householdId: string, id: string, status: NotificationStatus): Promise<Notification> {
@@ -280,7 +280,7 @@ export class NotificationsService {
         break;
     }
 
-    return await this.notificationRepository.save(notification);
+    return await this.notificationRepository.saveWithHousehold(householdId, notification);
   }
 
   async bulkUpdate(
@@ -288,14 +288,18 @@ export class NotificationsService {
     updateDto: BulkUpdateNotificationsDto,
     filters?: Partial<QueryNotificationsDto>,
   ): Promise<{ updated: number }> {
-    const where: FindOptionsWhere<Notification> = {
-      household_id: householdId,
-    };
-
+    const qb = this.notificationRepository.createQueryBuilderWithHousehold(householdId, 'notification');
+    
     // Apply filters
-    if (filters?.type) where.type = filters.type;
-    if (filters?.status) where.status = filters.status;
-    if (filters?.user_id) where.user_id = filters.user_id;
+    if (filters?.type) {
+      qb.andWhere('notification.type = :type', { type: filters.type });
+    }
+    if (filters?.status) {
+      qb.andWhere('notification.status = :status', { status: filters.status });
+    }
+    if (filters?.user_id) {
+      qb.andWhere('notification.user_id = :userId', { userId: filters.user_id });
+    }
 
     const updateData: Partial<Notification> = {};
     
@@ -307,53 +311,60 @@ export class NotificationsService {
       updateData.read_at = new Date();
     }
 
-    const result = await this.notificationRepository.update(where, updateData);
+    const result = await qb.update(Notification).set(updateData).execute();
     
     return { updated: result.affected || 0 };
   }
 
   async getUnreadCount(householdId: string, userId?: string): Promise<number> {
-    const where: FindOptionsWhere<Notification> = {
-      household_id: householdId,
-      read_at: null as any,
-      status: NotificationStatus.DELIVERED,
-    };
+    const qb = this.notificationRepository
+      .createQueryBuilderWithHousehold(householdId, 'notification')
+      .where('notification.read_at IS NULL')
+      .andWhere('notification.status = :status', { status: NotificationStatus.DELIVERED });
 
     if (userId) {
-      where.user_id = userId;
+      qb.andWhere('notification.user_id = :userId', { userId });
     }
 
-    return await this.notificationRepository.count({ where });
+    return await qb.getCount();
   }
 
   async getPendingNotifications(householdId?: string): Promise<Notification[]> {
-    const where: FindOptionsWhere<Notification> = {
-      status: NotificationStatus.PENDING,
-    };
-
     if (householdId) {
-      where.household_id = householdId;
+      return await this.notificationRepository.findWithHousehold(householdId, {
+        where: { status: NotificationStatus.PENDING },
+        relations: ['user'],
+        order: { priority: 'DESC', scheduled_at: 'ASC' },
+      });
     }
 
+    // Cross-household query (for background jobs)
     return await this.notificationRepository.find({
-      where,
+      where: { status: NotificationStatus.PENDING },
       relations: ['user'],
       order: { priority: 'DESC', scheduled_at: 'ASC' },
     });
   }
 
   async getOverdueNotifications(householdId?: string): Promise<Notification[]> {
-    const where: FindOptionsWhere<Notification> = {
-      status: NotificationStatus.PENDING,
-      scheduled_at: Between(new Date('1900-01-01'), new Date()),
-    };
-
     if (householdId) {
-      where.household_id = householdId;
+      const qb = this.notificationRepository
+        .createQueryBuilderWithHousehold(householdId, 'notification')
+        .leftJoinAndSelect('notification.user', 'user')
+        .where('notification.status = :status', { status: NotificationStatus.PENDING })
+        .andWhere('notification.scheduled_at < :now', { now: new Date() })
+        .orderBy('notification.priority', 'DESC')
+        .addOrderBy('notification.scheduled_at', 'ASC');
+
+      return await qb.getMany();
     }
 
+    // Cross-household query (for background jobs)
     return await this.notificationRepository.find({
-      where,
+      where: {
+        status: NotificationStatus.PENDING,
+        scheduled_at: Between(new Date('1900-01-01'), new Date()),
+      },
       relations: ['user'],
       order: { priority: 'DESC', scheduled_at: 'ASC' },
     });
@@ -373,15 +384,18 @@ export class NotificationsService {
     read_rate: number;
     click_rate: number;
   }> {
-    const where: FindOptionsWhere<Notification> = {
-      household_id: householdId,
-    };
+    const qb = this.notificationRepository.createQueryBuilderWithHousehold(householdId, 'notification');
 
     if (startDate || endDate) {
-      where.created_at = Between(startDate || new Date('1900-01-01'), endDate || new Date());
+      if (startDate) {
+        qb.andWhere('notification.created_at >= :startDate', { startDate });
+      }
+      if (endDate) {
+        qb.andWhere('notification.created_at <= :endDate', { endDate });
+      }
     }
 
-    const notifications = await this.notificationRepository.find({ where });
+    const notifications = await qb.getMany();
 
     const stats = {
       total: notifications.length,
@@ -435,9 +449,10 @@ export class NotificationsService {
     priority: NotificationPriority,
     channels: NotificationChannel[],
   ): Promise<boolean> {
-    const preferences = await this.preferencesRepository.findOne({
-      where: { household_id: householdId, user_id: userId },
-    });
+    const preferences = await this.preferencesRepository.findOneWithHousehold(
+      householdId,
+      { where: { user_id: userId } },
+    );
 
     if (!preferences) {
       return true; // No preferences means allow all notifications

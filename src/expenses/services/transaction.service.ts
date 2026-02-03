@@ -4,11 +4,10 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder, Between, Like, In } from 'typeorm';
 import { Transaction, TransactionType, TransactionStatus } from '../entities/transaction.entity';
 import { CreateTransactionDto, UpdateTransactionDto } from '../dto';
-import { Account } from '../../accounts/entities/account.entity';
+import { TransactionRepository } from '../repositories/transaction.repository';
+import { AccountsRepository } from '../../accounts/repositories/accounts.repository';
 
 export interface TransactionQueryOptions {
   search?: string;
@@ -38,10 +37,8 @@ export interface TransactionSummary {
 @Injectable()
 export class TransactionService {
   constructor(
-    @InjectRepository(Transaction)
-    private readonly transactionRepository: Repository<Transaction>,
-    @InjectRepository(Account)
-    private readonly accountRepository: Repository<Account>,
+    private readonly transactionRepository: TransactionRepository,
+    private readonly accountRepository: AccountsRepository,
   ) {}
 
   async create(
@@ -50,9 +47,10 @@ export class TransactionService {
     userId: string,
   ): Promise<Transaction> {
     // Validate account belongs to household
-    const account = await this.accountRepository.findOne({
-      where: { id: createTransactionDto.account_id, household_id: householdId },
-    });
+    const account = await this.accountRepository.findByIdWithHousehold(
+      householdId,
+      createTransactionDto.account_id,
+    );
 
     if (!account) {
       throw new NotFoundException('Account not found or does not belong to household');
@@ -60,9 +58,10 @@ export class TransactionService {
 
     // Validate transfer account if provided
     if (createTransactionDto.transfer_account_id) {
-      const transferAccount = await this.accountRepository.findOne({
-        where: { id: createTransactionDto.transfer_account_id, household_id: householdId },
-      });
+      const transferAccount = await this.accountRepository.findByIdWithHousehold(
+        householdId,
+        createTransactionDto.transfer_account_id,
+      );
 
       if (!transferAccount) {
         throw new NotFoundException('Transfer account not found or does not belong to household');
@@ -93,7 +92,7 @@ export class TransactionService {
         : undefined,
     });
 
-    return this.transactionRepository.save(transaction);
+    return this.transactionRepository.saveWithHousehold(householdId, transaction);
   }
 
   async findAll(
@@ -116,12 +115,11 @@ export class TransactionService {
     } = options;
 
     const query = this.transactionRepository
-      .createQueryBuilder('transaction')
+      .createQueryBuilderWithHousehold(householdId, 'transaction')
       .leftJoinAndSelect('transaction.account', 'account')
       .leftJoinAndSelect('transaction.category', 'category')
       .leftJoinAndSelect('transaction.transfer_account', 'transfer_account')
       .leftJoinAndSelect('transaction.created_by_user', 'user')
-      .where('transaction.household_id = :householdId', { householdId })
       .orderBy('transaction.date', 'DESC')
       .addOrderBy('transaction.created_at', 'DESC');
 
@@ -187,8 +185,8 @@ export class TransactionService {
   }
 
   async findOne(id: string, householdId: string): Promise<Transaction> {
-    const transaction = await this.transactionRepository.findOne({
-      where: { id, household_id: householdId },
+    const transaction = await this.transactionRepository.findOneWithHousehold(householdId, {
+      where: { id },
       relations: ['account', 'category', 'transfer_account', 'created_by_user'],
     });
 
@@ -209,9 +207,10 @@ export class TransactionService {
 
     // Validate account if being updated
     if (updateTransactionDto.account_id && updateTransactionDto.account_id !== transaction.account_id) {
-      const account = await this.accountRepository.findOne({
-        where: { id: updateTransactionDto.account_id, household_id: householdId },
-      });
+      const account = await this.accountRepository.findByIdWithHousehold(
+        householdId,
+        updateTransactionDto.account_id,
+      );
 
       if (!account) {
         throw new NotFoundException('Account not found or does not belong to household');
@@ -220,9 +219,10 @@ export class TransactionService {
 
     // Validate transfer account if being updated
     if (updateTransactionDto.transfer_account_id) {
-      const transferAccount = await this.accountRepository.findOne({
-        where: { id: updateTransactionDto.transfer_account_id, household_id: householdId },
-      });
+      const transferAccount = await this.accountRepository.findByIdWithHousehold(
+        householdId,
+        updateTransactionDto.transfer_account_id,
+      );
 
       if (!transferAccount) {
         throw new NotFoundException('Transfer account not found or does not belong to household');
@@ -237,7 +237,7 @@ export class TransactionService {
         : transaction.recurring_end_date,
     });
 
-    return this.transactionRepository.save(transaction);
+    return this.transactionRepository.saveWithHousehold(householdId, transaction);
   }
 
   async remove(id: string, householdId: string): Promise<void> {
@@ -251,8 +251,7 @@ export class TransactionService {
     endDate?: string,
   ): Promise<TransactionSummary> {
     const query = this.transactionRepository
-      .createQueryBuilder('transaction')
-      .where('transaction.household_id = :householdId', { householdId })
+      .createQueryBuilderWithHousehold(householdId, 'transaction')
       .andWhere('transaction.status = :status', { status: TransactionStatus.COMPLETED });
 
     if (startDate) {
@@ -309,7 +308,7 @@ export class TransactionService {
   ): Promise<Transaction> {
     const transaction = await this.findOne(id, householdId);
     transaction.status = status;
-    return this.transactionRepository.save(transaction);
+    return this.transactionRepository.saveWithHousehold(householdId, transaction);
   }
 
   async duplicateTransaction(
@@ -334,6 +333,6 @@ export class TransactionService {
     delete duplicateData.updated_at;
 
     const newTransaction = this.transactionRepository.create(duplicateData);
-    return this.transactionRepository.save(newTransaction);
+    return this.transactionRepository.saveWithHousehold(householdId, newTransaction);
   }
 }

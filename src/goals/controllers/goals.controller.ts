@@ -29,7 +29,7 @@ import {
   ApiNotFoundResponse,
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
-import { KeycloakAuthGuard } from '../../auth/guards/keycloak-auth.guard';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { RequireRole } from '../../auth/decorators/roles.decorator';
@@ -41,8 +41,8 @@ import { CreateGoalDto, UpdateGoalDto, GoalContributionDto, GoalWithdrawalDto } 
 import { Goal, GoalType, GoalStatus, GoalPriority } from '../entities/goal.entity';
 
 @ApiTags('Goals')
-@ApiBearerAuth('JWT-auth')
-@UseGuards(KeycloakAuthGuard, HouseholdGuard, RolesGuard)
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, HouseholdGuard, RolesGuard)
 @Controller('goals')
 export class GoalsController {
   constructor(private readonly goalsService: GoalsService) {}

@@ -5,13 +5,16 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder, Between, LessThan } from 'typeorm';
+import { SelectQueryBuilder, Between, LessThan } from 'typeorm';
 import { Goal, GoalType, GoalStatus, GoalPriority, RecurrenceType } from '../entities/goal.entity';
 import { GoalActivity, GoalActivityType } from '../entities/goal-activity.entity';
 import { CreateGoalDto, UpdateGoalDto, CreateGoalActivityDto, GoalContributionDto, GoalWithdrawalDto } from '../dto';
 import { Account } from '../../accounts/entities/account.entity';
 import { Category } from '../../expenses/entities/category.entity';
+import { GoalRepository } from '../repositories/goal.repository';
+import { GoalActivityRepository } from '../repositories/goal-activity.repository';
+import { AccountsRepository } from '../../accounts/repositories/accounts.repository';
+import { CategoryRepository } from '../../expenses/repositories/category.repository';
 
 export interface GoalQueryOptions {
   search?: string;
@@ -41,14 +44,10 @@ export interface GoalSummary {
 @Injectable()
 export class GoalsService {
   constructor(
-    @InjectRepository(Goal)
-    private readonly goalRepository: Repository<Goal>,
-    @InjectRepository(GoalActivity)
-    private readonly goalActivityRepository: Repository<GoalActivity>,
-    @InjectRepository(Account)
-    private readonly accountRepository: Repository<Account>,
-    @InjectRepository(Category)
-    private readonly categoryRepository: Repository<Category>,
+    private readonly goalRepository: GoalRepository,
+    private readonly goalActivityRepository: GoalActivityRepository,
+    private readonly accountRepository: AccountsRepository,
+    private readonly categoryRepository: CategoryRepository,
   ) {}
 
   async create(
@@ -64,9 +63,10 @@ export class GoalsService {
 
     // Validate account belongs to household if provided
     if (createGoalDto.account_id) {
-      const account = await this.accountRepository.findOne({
-        where: { id: createGoalDto.account_id, household_id: householdId },
-      });
+      const account = await this.accountRepository.findOneWithHousehold(
+        householdId,
+        { where: { id: createGoalDto.account_id } },
+      );
       if (!account) {
         throw new NotFoundException('Account not found or does not belong to household');
       }
@@ -74,9 +74,10 @@ export class GoalsService {
 
     // Validate category belongs to household if provided
     if (createGoalDto.category_id) {
-      const category = await this.categoryRepository.findOne({
-        where: { id: createGoalDto.category_id, household_id: householdId },
-      });
+      const category = await this.categoryRepository.findOneWithHousehold(
+        householdId,
+        { where: { id: createGoalDto.category_id } },
+      );
       if (!category) {
         throw new NotFoundException('Category not found or does not belong to household');
       }
@@ -98,7 +99,7 @@ export class GoalsService {
       next_contribution_date: nextContributionDate,
     });
 
-    const savedGoal = await this.goalRepository.save(goal);
+    const savedGoal = await this.goalRepository.saveWithHousehold(householdId, goal);
 
     // Create initial activity record
     await this.createActivity({
@@ -131,11 +132,10 @@ export class GoalsService {
     } = options;
 
     const queryBuilder = this.goalRepository
-      .createQueryBuilder('goal')
+      .createQueryBuilderWithHousehold(householdId, 'goal')
       .leftJoinAndSelect('goal.creator', 'creator')
       .leftJoinAndSelect('goal.account', 'account')
-      .leftJoinAndSelect('goal.category', 'category')
-      .where('goal.household_id = :householdId', { householdId });
+      .leftJoinAndSelect('goal.category', 'category');
 
     if (search) {
       queryBuilder.andWhere(
@@ -198,10 +198,13 @@ export class GoalsService {
   }
 
   async findOne(id: string, householdId: string): Promise<Goal> {
-    const goal = await this.goalRepository.findOne({
-      where: { id, household_id: householdId },
-      relations: ['creator', 'account', 'category'],
-    });
+    const goal = await this.goalRepository.findOneWithHousehold(
+      householdId,
+      {
+        where: { id },
+        relations: ['creator', 'account', 'category'],
+      },
+    );
 
     if (!goal) {
       throw new NotFoundException('Goal not found');
@@ -228,9 +231,10 @@ export class GoalsService {
 
     // Validate account if provided
     if (updateGoalDto.account_id) {
-      const account = await this.accountRepository.findOne({
-        where: { id: updateGoalDto.account_id, household_id: householdId },
-      });
+      const account = await this.accountRepository.findOneWithHousehold(
+        householdId,
+        { where: { id: updateGoalDto.account_id } },
+      );
       if (!account) {
         throw new NotFoundException('Account not found or does not belong to household');
       }
@@ -238,9 +242,10 @@ export class GoalsService {
 
     // Validate category if provided
     if (updateGoalDto.category_id) {
-      const category = await this.categoryRepository.findOne({
-        where: { id: updateGoalDto.category_id, household_id: householdId },
-      });
+      const category = await this.categoryRepository.findOneWithHousehold(
+        householdId,
+        { where: { id: updateGoalDto.category_id } },
+      );
       if (!category) {
         throw new NotFoundException('Category not found or does not belong to household');
       }
@@ -264,7 +269,7 @@ export class GoalsService {
     };
 
     Object.assign(goal, updateGoalDto);
-    const updatedGoal = await this.goalRepository.save(goal);
+    const updatedGoal = await this.goalRepository.saveWithHousehold(householdId, goal);
 
     // Create activity records for significant changes
     if (updateGoalDto.target_amount && previousValues.target_amount !== updateGoalDto.target_amount) {
@@ -288,7 +293,7 @@ export class GoalsService {
       // Handle goal completion
       if (updateGoalDto.status === GoalStatus.COMPLETED) {
         goal.completed_at = new Date();
-        await this.goalRepository.save(goal);
+        await this.goalRepository.saveWithHousehold(householdId, goal);
         
         await this.createActivity({
           goal_id: id,
@@ -344,7 +349,7 @@ export class GoalsService {
       goal.completed_at = new Date();
     }
 
-    const updatedGoal = await this.goalRepository.save(goal);
+    const updatedGoal = await this.goalRepository.saveWithHousehold(householdId, goal);
 
     // Create contribution activity
     await this.createActivity({
@@ -398,7 +403,7 @@ export class GoalsService {
       goal.completed_at = undefined;
     }
 
-    const updatedGoal = await this.goalRepository.save(goal);
+    const updatedGoal = await this.goalRepository.saveWithHousehold(householdId, goal);
 
     // Create withdrawal activity
     await this.createActivity({
@@ -422,13 +427,16 @@ export class GoalsService {
   ): Promise<{ activities: GoalActivity[]; meta: any }> {
     await this.findOne(id, householdId); // Verify goal exists and user has access
 
-    const [activities, total] = await this.goalActivityRepository.findAndCount({
-      where: { goal_id: id, household_id: householdId },
-      relations: ['performer'],
-      order: { created_at: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    const skip = (page - 1) * limit;
+    const queryBuilder = this.goalActivityRepository
+      .createQueryBuilderWithHousehold(householdId, 'activity')
+      .leftJoinAndSelect('activity.performer', 'performer')
+      .where('activity.goal_id = :goalId', { goalId: id })
+      .orderBy('activity.created_at', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [activities, total] = await queryBuilder.getManyAndCount();
 
     return {
       activities,
@@ -442,9 +450,7 @@ export class GoalsService {
   }
 
   async getSummary(householdId: string): Promise<GoalSummary> {
-    const goals = await this.goalRepository.find({
-      where: { household_id: householdId },
-    });
+    const goals = await this.goalRepository.findWithHousehold(householdId, {});
 
     const now = new Date();
     const thirtyDaysFromNow = new Date();
@@ -497,7 +503,7 @@ export class GoalsService {
       performed_by: userId,
     });
 
-    return this.goalActivityRepository.save(activity);
+    return this.goalActivityRepository.saveWithHousehold(householdId, activity);
   }
 
   private calculateNextContributionDate(recurrenceType: RecurrenceType): Date {

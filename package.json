@@ -26,6 +26,7 @@
     "seed:dev": "ts-node src/database/seeds/index.ts"
   },
   "dependencies": {
+    "@nestjs/bull": "^11.0.4",
     "@nestjs/cache-manager": "^3.0.1",
     "@nestjs/common": "^11.1.8",
     "@nestjs/config": "^4.0.2",
@@ -36,9 +37,11 @@
     "@nestjs/swagger": "^11.2.1",
     "@nestjs/typeorm": "^11.0.0",
     "@types/bcrypt": "^6.0.0",
+    "@types/bull": "^4.10.4",
     "@types/jsonwebtoken": "^9.0.10",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
+    "bull": "^4.16.5",
     "cache-manager": "^7.2.4",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
@@ -89,7 +92,10 @@
       "json",
       "ts"
     ],
-    "roots": ["<rootDir>/src", "<rootDir>/libs"],
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/libs"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"

@@ -35,7 +35,7 @@ export class AuthService {
     const user = await this.usersRepository.findOne({ 
       where: { email },
       relations: ['household'],
-      select: ['id', 'email', 'first_name', 'last_name', 'role', 'household_id', 'password_hash', 'is_active', 'keycloak_id']
+      select: ['id', 'email', 'first_name', 'last_name', 'role', 'household_id', 'password_hash', 'is_active']
     });
     
     // Check if user exists and has a password hash (local authentication)

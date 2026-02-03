@@ -4,8 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindManyOptions } from 'typeorm';
+import { FindManyOptions } from 'typeorm';
 import {
   Loan,
   LoanType,
@@ -23,14 +22,14 @@ import {
   LoanPaymentSummaryDto,
 } from '../dto';
 import { PaginationDto } from '../../shared/dto/pagination.dto';
+import { LoanRepository } from '../repositories/loan.repository';
+import { LoanPaymentRepository } from '../repositories/loan-payment.repository';
 
 @Injectable()
 export class LoansService {
   constructor(
-    @InjectRepository(Loan)
-    private readonly loanRepository: Repository<Loan>,
-    @InjectRepository(LoanPayment)
-    private readonly loanPaymentRepository: Repository<LoanPayment>,
+    private readonly loanRepository: LoanRepository,
+    private readonly loanPaymentRepository: LoanPaymentRepository,
   ) {}
 
   async create(
@@ -51,7 +50,7 @@ export class LoansService {
       total_interest_paid: 0,
     });
 
-    return await this.loanRepository.save(loan);
+    return await this.loanRepository.saveWithHousehold(householdId, loan);
   }
 
   async findAll(
@@ -64,10 +63,9 @@ export class LoansService {
     },
   ): Promise<{ loans: Loan[]; total: number }> {
     const queryBuilder = this.loanRepository
-      .createQueryBuilder('loan')
+      .createQueryBuilderWithHousehold(householdId, 'loan')
       .leftJoinAndSelect('loan.user', 'user')
-      .leftJoinAndSelect('loan.account', 'account')
-      .where('loan.household_id = :householdId', { householdId });
+      .leftJoinAndSelect('loan.account', 'account');
 
     if (filters?.type) {
       queryBuilder.andWhere('loan.type = :type', { type: filters.type });
@@ -92,10 +90,13 @@ export class LoansService {
   }
 
   async findOne(id: string, householdId: string): Promise<Loan> {
-    const loan = await this.loanRepository.findOne({
-      where: { id, household_id: householdId },
-      relations: ['user', 'account'],
-    });
+    const loan = await this.loanRepository.findOneWithHousehold(
+      householdId,
+      {
+        where: { id },
+        relations: ['user', 'account'],
+      },
+    );
 
     if (!loan) {
       throw new NotFoundException('Loan not found');
@@ -114,17 +115,17 @@ export class LoansService {
     // Update loan properties
     Object.assign(loan, updateLoanDto);
 
-    return await this.loanRepository.save(loan);
+    return await this.loanRepository.saveWithHousehold(householdId, loan);
   }
 
   async remove(id: string, householdId: string): Promise<void> {
     const loan = await this.findOne(id, householdId);
-    await this.loanRepository.remove(loan);
+    await this.loanRepository.removeWithHousehold(householdId, loan);
   }
 
   async getSummary(householdId: string): Promise<LoanSummaryDto> {
-    const loans = await this.loanRepository.find({
-      where: { household_id: householdId, status: LoanStatus.ACTIVE },
+    const loans = await this.loanRepository.findWithHousehold(householdId, {
+      where: { status: LoanStatus.ACTIVE },
     });
 
     const totalLoans = loans.length;
@@ -273,7 +274,7 @@ export class LoansService {
       household_id: householdId,
     });
 
-    const savedPayment = await this.loanPaymentRepository.save(payment);
+    const savedPayment = await this.loanPaymentRepository.saveWithHousehold(householdId, payment);
 
     // Update loan statistics if payment is completed
     if (savedPayment.status === PaymentStatus.COMPLETED) {
@@ -327,7 +328,7 @@ export class LoansService {
       loan.next_payment_date = undefined;
     }
 
-    await this.loanRepository.save(loan);
+    await this.loanRepository.saveWithHousehold(loan.household_id, loan);
   }
 
   async findPayments(
@@ -338,13 +339,16 @@ export class LoansService {
     // Verify loan exists and belongs to household
     await this.findOne(loanId, householdId);
 
-    const [payments, total] = await this.loanPaymentRepository.findAndCount({
-      where: { loan_id: loanId, household_id: householdId },
-      relations: ['user'],
-      order: { payment_date: 'DESC' },
-      skip: (paginationDto.page! - 1) * paginationDto.limit!,
-      take: paginationDto.limit!,
-    });
+    const skip = (paginationDto.page! - 1) * paginationDto.limit!;
+    const queryBuilder = this.loanPaymentRepository
+      .createQueryBuilderWithHousehold(householdId, 'payment')
+      .leftJoinAndSelect('payment.user', 'user')
+      .where('payment.loan_id = :loanId', { loanId })
+      .orderBy('payment.payment_date', 'DESC')
+      .skip(skip)
+      .take(paginationDto.limit!);
+
+    const [payments, total] = await queryBuilder.getManyAndCount();
 
     return { payments, total };
   }
@@ -353,10 +357,13 @@ export class LoansService {
     paymentId: string,
     householdId: string,
   ): Promise<LoanPayment> {
-    const payment = await this.loanPaymentRepository.findOne({
-      where: { id: paymentId, household_id: householdId },
-      relations: ['user', 'loan'],
-    });
+    const payment = await this.loanPaymentRepository.findOneWithHousehold(
+      householdId,
+      {
+        where: { id: paymentId },
+        relations: ['user', 'loan'],
+      },
+    );
 
     if (!payment) {
       throw new NotFoundException('Payment not found');
@@ -380,7 +387,7 @@ export class LoansService {
     }
 
     Object.assign(payment, updatePaymentDto);
-    return await this.loanPaymentRepository.save(payment);
+    return await this.loanPaymentRepository.saveWithHousehold(householdId, payment);
   }
 
   async removePayment(paymentId: string, householdId: string): Promise<void> {
@@ -392,7 +399,7 @@ export class LoansService {
       );
     }
 
-    await this.loanPaymentRepository.remove(payment);
+    await this.loanPaymentRepository.removeWithHousehold(householdId, payment);
   }
 
   async getPaymentSummary(
@@ -402,10 +409,9 @@ export class LoansService {
     // Verify loan exists
     await this.findOne(loanId, householdId);
 
-    const payments = await this.loanPaymentRepository.find({
+    const payments = await this.loanPaymentRepository.findWithHousehold(householdId, {
       where: { 
-        loan_id: loanId, 
-        household_id: householdId,
+        loan_id: loanId,
         status: PaymentStatus.COMPLETED,
       },
       order: { payment_date: 'ASC' },

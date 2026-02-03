@@ -17,20 +17,19 @@ async function bootstrap() {
   // Swagger configuration
   const config = new DocumentBuilder()
     .setTitle('HFP API')
-    .setDescription('Household Financial Platform - Multi-tenant financial management platform')
+    .setDescription('Household Financial Platform - Multi-tenant financial management platform with local JWT authentication')
     .setVersion('1.0')
     .addBearerAuth(
       {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
-        name: 'JWT',
-        description: 'Enter JWT token',
+        name: 'Authorization',
+        description: 'Enter JWT token (obtained from /auth/login or /auth/register)',
         in: 'header',
       },
-      'JWT-auth', // This name here is important for matching up with @ApiBearerAuth() in your controllers
     )
-    .addTag('Authentication', 'Login and token management')
+    .addTag('Authentication', 'User authentication - login, register, and profile management')
     .addTag('Users', 'User management and profiles')
     .addTag('Households', 'Household management and member operations')
     .addTag('Accounts', 'Financial account management')

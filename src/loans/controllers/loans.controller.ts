@@ -31,7 +31,7 @@ import {
 } from '../dto';
 import { Loan, LoanType, LoanStatus } from '../entities/loan.entity';
 import { LoanPayment } from '../entities/loan-payment.entity';
-import { KeycloakAuthGuard } from '../../auth/guards/keycloak-auth.guard';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { CurrentHousehold } from '../../shared/decorators/current-household.decorator';
@@ -39,7 +39,7 @@ import { PaginationDto } from '../../shared/dto/pagination.dto';
 
 @ApiTags('loans')
 @ApiBearerAuth()
-@UseGuards(KeycloakAuthGuard, HouseholdGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 @Controller('loans')
 export class LoansController {
   constructor(private readonly loansService: LoansService) {}

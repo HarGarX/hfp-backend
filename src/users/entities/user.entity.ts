@@ -14,17 +14,14 @@ export class User extends HouseholdScopedEntity {
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
 
-  @Column({ type: 'varchar', length: 255, nullable: true, unique: true })
-  keycloak_id?: string;
-
   @Column({ type: 'varchar', length: 255 })
   first_name: string;
 
   @Column({ type: 'varchar', length: 255 })
   last_name: string;
 
-  @Column({ type: 'varchar', length: 255, select: false, nullable: true })
-  password_hash?: string;
+  @Column({ type: 'varchar', length: 255, select: false })
+  password_hash: string;
 
   @Column({
     type: 'enum',

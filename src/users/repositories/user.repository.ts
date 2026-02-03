@@ -57,27 +57,6 @@ export class UserRepository extends BaseTenantRepository<User> {
   }
 
   /**
-   * Find user by Keycloak ID within tenant scope
-   */
-  async findByKeycloakId(keycloakId: string): Promise<User | null> {
-    const tenantId = this.tenantContextService.getTenantId();
-    if (!tenantId) {
-      return this.repository.findOne({
-        where: { keycloak_id: keycloakId },
-        relations: ['household'],
-      });
-    }
-
-    return this.repository.findOne({
-      where: { 
-        keycloak_id: keycloakId,
-        household_id: tenantId,
-      },
-      relations: ['household'],
-    });
-  }
-
-  /**
    * Get paginated list of users with tenant filtering
    */
   async findAllPaginated(options: UserQueryOptions): Promise<PaginatedUsers> {
