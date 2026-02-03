@@ -5,6 +5,7 @@ import {
   ConflictException,
   BadRequestException 
 } from '@nestjs/common';
+import { CacheService } from '../../libs/cache';
 import { Account, AccountType, AccountStatus } from './entities/account.entity';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
@@ -36,8 +37,11 @@ export interface AccountSummary {
 
 @Injectable()
 export class AccountsService {
+  private readonly CACHE_TTL = 300; // 5 minutes
+  
   constructor(
     private accountsRepository: AccountsRepository,
+    private cacheService: CacheService,
   ) {}
 
   async create(
@@ -77,7 +81,13 @@ export class AccountsService {
       created_by: userId,
     });
 
-    return this.accountsRepository.saveWithHousehold(householdId, account);
+    const savedAccount = await this.accountsRepository.saveWithHousehold(householdId, account);
+    
+    // Invalidate accounts list cache
+    await this.cacheService.del(householdId, 'accounts:list');
+    await this.cacheService.del(householdId, 'accounts:summary');
+    
+    return savedAccount;
   }
 
   async findAll(
@@ -146,6 +156,14 @@ export class AccountsService {
   }
 
   async findOne(id: string, householdId: string): Promise<Account> {
+    // Try cache first
+    const cacheKey = `accounts:${id}`;
+    const cached = await this.cacheService.get<Account>(householdId, cacheKey);
+    
+    if (cached) {
+      return cached;
+    }
+    
     const account = await this.accountsRepository.findOneWithHousehold(householdId, {
       where: { 
         id,
@@ -157,6 +175,9 @@ export class AccountsService {
     if (!account) {
       throw new NotFoundException(`Account with ID ${id} not found`);
     }
+
+    // Cache the account
+    await this.cacheService.set(householdId, cacheKey, account, this.CACHE_TTL);
 
     return account;
   }
@@ -196,7 +217,14 @@ export class AccountsService {
     // Update account
     Object.assign(account, updateAccountDto);
     
-    return this.accountsRepository.saveWithHousehold(householdId, account);
+    const updatedAccount = await this.accountsRepository.saveWithHousehold(householdId, account);
+    
+    // Invalidate caches
+    await this.cacheService.del(householdId, `accounts:${id}`);
+    await this.cacheService.del(householdId, 'accounts:list');
+    await this.cacheService.del(householdId, 'accounts:summary');
+    
+    return updatedAccount;
   }
 
   async remove(id: string, householdId: string): Promise<void> {
@@ -205,6 +233,11 @@ export class AccountsService {
     // Soft delete
     account.is_active = false;
     await this.accountsRepository.saveWithHousehold(householdId, account);
+    
+    // Invalidate caches
+    await this.cacheService.del(householdId, `accounts:${id}`);
+    await this.cacheService.del(householdId, 'accounts:list');
+    await this.cacheService.del(householdId, 'accounts:summary');
   }
 
   async updateBalance(
@@ -219,10 +252,24 @@ export class AccountsService {
     account.available_balance = availableBalance ?? currentBalance;
     account.last_synced_at = new Date();
 
-    return this.accountsRepository.saveWithHousehold(householdId, account);
+    const updatedAccount = await this.accountsRepository.saveWithHousehold(householdId, account);
+    
+    // Invalidate caches
+    await this.cacheService.del(householdId, `accounts:${id}`);
+    await this.cacheService.del(householdId, 'accounts:summary');
+    
+    return updatedAccount;
   }
 
   async getAccountSummary(householdId: string): Promise<AccountSummary> {
+    // Try cache first
+    const cacheKey = 'accounts:summary';
+    const cached = await this.cacheService.get<AccountSummary>(householdId, cacheKey);
+    
+    if (cached) {
+      return cached;
+    }
+    
     const accounts = await this.accountsRepository.findWithHousehold(householdId, {
       where: { 
         is_active: true,
@@ -242,12 +289,17 @@ export class AccountsService {
       return acc;
     }, {} as Record<string, number>);
 
-    return {
+    const summary = {
       total_accounts: accounts.length,
       total_balance: totalBalance,
       accounts_by_type: accountsByType,
       accounts_by_currency: accountsByCurrency,
     };
+    
+    // Cache the summary
+    await this.cacheService.set(householdId, cacheKey, summary, this.CACHE_TTL);
+    
+    return summary;
   }
 
   async activateAccount(id: string, householdId: string): Promise<Account> {

@@ -8,6 +8,7 @@ import {
   Delete,
   Query,
   UseGuards,
+  UseInterceptors,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus
@@ -28,8 +29,11 @@ import {
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from '../shared/interceptors/tenant-context.interceptor';
 import { HouseholdGuard } from '../shared/guards/household.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { HouseholdThrottlerGuard } from '../../libs/throttle';
+import { AuditLog, AuditAction } from '../../libs/logger';
 import { RequireRole } from '../auth/decorators/roles.decorator';
 import { CurrentHousehold } from '../shared/decorators/current-household.decorator';
 import { User, UserRole } from '../users/entities/user.entity';
@@ -42,13 +46,15 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('Accounts')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, HouseholdGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard, RolesGuard, HouseholdThrottlerGuard)
+@UseInterceptors(TenantContextInterceptor)
 @Controller('accounts')
 export class AccountsController {
   constructor(private readonly accountsService: AccountsService) {}
 
   @Post()
   @RequireRole(UserRole.HOUSEHOLD_ADMIN, UserRole.MEMBER)
+  @AuditLog(AuditAction.CREATE, 'account')
   @ApiOperation({
     summary: 'Create a new financial account',
     description: 'Create a new financial account for the household. Supports various account types including checking, savings, credit cards, and investments.'

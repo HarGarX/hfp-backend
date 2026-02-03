@@ -3,13 +3,17 @@ import { UserRepository, UserQueryOptions, PaginatedUsers } from './repositories
 import { User, UserRole } from './entities/user.entity';
 import { TenantContextService } from '../../libs/tenant';
 import { CreateUserDto, UpdateUserDto, ChangePasswordDto } from './dto';
+import { CacheService } from '../../libs/cache/cache.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
+  private readonly CACHE_TTL = 300; // 5 minutes
+
   constructor(
     private readonly userRepository: UserRepository,
     private readonly tenantContextService: TenantContextService,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
@@ -43,7 +47,13 @@ export class UsersService {
       ...userData,
     };
 
-    return this.userRepository.create(userToCreate as any);
+    const user = await this.userRepository.create(userToCreate as any);
+
+    // Invalidate caches
+    await this.cacheService.del(tenantId, 'users:list');
+    await this.cacheService.del(tenantId, `users:email:${email}`);
+
+    return user;
   }
 
   async findAll(options: UserQueryOptions = {}): Promise<PaginatedUsers> {
@@ -55,10 +65,35 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+
+    // Cache using household_id as tenant context
+    const cacheKey = `users:${id}`;
+    const cached = await this.cacheService.get<User>(user.household_id, cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    // Cache the result
+    await this.cacheService.set(user.household_id, cacheKey, user, this.CACHE_TTL);
     return user;
   }
 
   async findByEmail(email: string): Promise<User | null> {
+    const tenantId = this.tenantContextService.getTenantId();
+    if (tenantId) {
+      const cacheKey = `users:email:${email}`;
+      const cached = await this.cacheService.get<User>(tenantId, cacheKey);
+      if (cached) {
+        return cached;
+      }
+
+      const user = await this.userRepository.findByEmail(email);
+      if (user) {
+        await this.cacheService.set(tenantId, cacheKey, user, this.CACHE_TTL);
+      }
+      return user;
+    }
+
     return this.userRepository.findByEmail(email);
   }
 
@@ -70,6 +105,11 @@ export class UsersService {
     if (!updatedUser) {
       throw new NotFoundException('User not found or access denied');
     }
+
+    // Invalidate caches
+    await this.cacheService.del(existingUser.household_id, `users:${id}`);
+    await this.cacheService.del(existingUser.household_id, `users:email:${existingUser.email}`);
+    await this.cacheService.del(existingUser.household_id, 'users:list');
 
     return updatedUser;
   }
@@ -89,6 +129,11 @@ export class UsersService {
     if (!deleted) {
       throw new ForbiddenException('Access denied or user not found');
     }
+
+    // Invalidate caches
+    await this.cacheService.del(user.household_id, `users:${id}`);
+    await this.cacheService.del(user.household_id, `users:email:${user.email}`);
+    await this.cacheService.del(user.household_id, 'users:list');
   }
 
   async activate(id: string): Promise<User> {

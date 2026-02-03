@@ -5,6 +5,7 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
+import { CacheService } from '../../../libs/cache';
 import { SelectQueryBuilder, Between, LessThan } from 'typeorm';
 import { Goal, GoalType, GoalStatus, GoalPriority, RecurrenceType } from '../entities/goal.entity';
 import { GoalActivity, GoalActivityType } from '../entities/goal-activity.entity';
@@ -43,11 +44,14 @@ export interface GoalSummary {
 
 @Injectable()
 export class GoalsService {
+  private readonly CACHE_TTL = 300; // 5 minutes
+  
   constructor(
     private readonly goalRepository: GoalRepository,
     private readonly goalActivityRepository: GoalActivityRepository,
     private readonly accountRepository: AccountsRepository,
     private readonly categoryRepository: CategoryRepository,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(
@@ -100,6 +104,10 @@ export class GoalsService {
     });
 
     const savedGoal = await this.goalRepository.saveWithHousehold(householdId, goal);
+
+    // Invalidate goals cache
+    await this.cacheService.del(householdId, 'goals:list');
+    await this.cacheService.del(householdId, 'goals:summary');
 
     // Create initial activity record
     await this.createActivity({
@@ -198,6 +206,13 @@ export class GoalsService {
   }
 
   async findOne(id: string, householdId: string): Promise<Goal> {
+    // Try cache first
+    const cacheKey = `goals:${id}`;
+    const cached = await this.cacheService.get<Goal>(householdId, cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const goal = await this.goalRepository.findOneWithHousehold(
       householdId,
       {
@@ -210,6 +225,8 @@ export class GoalsService {
       throw new NotFoundException('Goal not found');
     }
 
+    // Cache the result
+    await this.cacheService.set(householdId, cacheKey, goal, this.CACHE_TTL);
     return goal;
   }
 
@@ -308,6 +325,11 @@ export class GoalsService {
       }
     }
 
+    // Invalidate caches
+    await this.cacheService.del(householdId, `goals:${id}`);
+    await this.cacheService.del(householdId, 'goals:list');
+    await this.cacheService.del(householdId, 'goals:summary');
+
     return updatedGoal;
   }
 
@@ -326,6 +348,11 @@ export class GoalsService {
     }, householdId, userId);
 
     await this.goalRepository.softDelete(id);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `goals:${id}`);
+    await this.cacheService.del(householdId, 'goals:list');
+    await this.cacheService.del(householdId, 'goals:summary');
   }
 
   async contribute(
@@ -379,6 +406,11 @@ export class GoalsService {
       }
     }
 
+    // Invalidate caches
+    await this.cacheService.del(householdId, `goals:${id}`);
+    await this.cacheService.del(householdId, 'goals:list');
+    await this.cacheService.del(householdId, 'goals:summary');
+
     return updatedGoal;
   }
 
@@ -416,6 +448,11 @@ export class GoalsService {
       transaction_id: withdrawalDto.transaction_id,
     }, householdId, userId);
 
+    // Invalidate caches
+    await this.cacheService.del(householdId, `goals:${id}`);
+    await this.cacheService.del(householdId, 'goals:list');
+    await this.cacheService.del(householdId, 'goals:summary');
+
     return updatedGoal;
   }
 
@@ -450,46 +487,53 @@ export class GoalsService {
   }
 
   async getSummary(householdId: string): Promise<GoalSummary> {
-    const goals = await this.goalRepository.findWithHousehold(householdId, {});
+    return this.cacheService.wrap(
+      householdId,
+      'goals:summary',
+      async () => {
+        const goals = await this.goalRepository.findWithHousehold(householdId, {});
 
-    const now = new Date();
-    const thirtyDaysFromNow = new Date();
-    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+        const now = new Date();
+        const thirtyDaysFromNow = new Date();
+        thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
-    const summary: GoalSummary = {
-      totalGoals: goals.length,
-      activeGoals: goals.filter(g => g.status === GoalStatus.ACTIVE).length,
-      completedGoals: goals.filter(g => g.status === GoalStatus.COMPLETED).length,
-      totalTargetAmount: goals.reduce((sum, g) => sum + Number(g.target_amount), 0),
-      totalCurrentAmount: goals.reduce((sum, g) => sum + Number(g.current_amount), 0),
-      totalProgress: 0,
-      overdueGoals: goals.filter(g => 
-        g.status === GoalStatus.ACTIVE && new Date(g.target_date) < now
-      ).length,
-      goalsByType: {} as Record<GoalType, number>,
-      goalsByPriority: {} as Record<GoalPriority, number>,
-      upcomingDeadlines: goals.filter(g => 
-        g.status === GoalStatus.ACTIVE && 
-        new Date(g.target_date) <= thirtyDaysFromNow && 
-        new Date(g.target_date) >= now
-      ).sort((a, b) => new Date(a.target_date).getTime() - new Date(b.target_date).getTime()).slice(0, 5),
-    };
+        const summary: GoalSummary = {
+          totalGoals: goals.length,
+          activeGoals: goals.filter(g => g.status === GoalStatus.ACTIVE).length,
+          completedGoals: goals.filter(g => g.status === GoalStatus.COMPLETED).length,
+          totalTargetAmount: goals.reduce((sum, g) => sum + Number(g.target_amount), 0),
+          totalCurrentAmount: goals.reduce((sum, g) => sum + Number(g.current_amount), 0),
+          totalProgress: 0,
+          overdueGoals: goals.filter(g => 
+            g.status === GoalStatus.ACTIVE && new Date(g.target_date) < now
+          ).length,
+          goalsByType: {} as Record<GoalType, number>,
+          goalsByPriority: {} as Record<GoalPriority, number>,
+          upcomingDeadlines: goals.filter(g => 
+            g.status === GoalStatus.ACTIVE && 
+            new Date(g.target_date) <= thirtyDaysFromNow && 
+            new Date(g.target_date) >= now
+          ).sort((a, b) => new Date(a.target_date).getTime() - new Date(b.target_date).getTime()).slice(0, 5),
+        };
 
-    summary.totalProgress = summary.totalTargetAmount > 0 
-      ? (summary.totalCurrentAmount / summary.totalTargetAmount) * 100 
-      : 0;
+        summary.totalProgress = summary.totalTargetAmount > 0 
+          ? (summary.totalCurrentAmount / summary.totalTargetAmount) * 100 
+          : 0;
 
-    // Initialize counts
-    Object.values(GoalType).forEach(type => summary.goalsByType[type] = 0);
-    Object.values(GoalPriority).forEach(priority => summary.goalsByPriority[priority] = 0);
+        // Initialize counts
+        Object.values(GoalType).forEach(type => summary.goalsByType[type] = 0);
+        Object.values(GoalPriority).forEach(priority => summary.goalsByPriority[priority] = 0);
 
-    // Count goals by type and priority
-    goals.forEach(goal => {
-      summary.goalsByType[goal.goal_type]++;
-      summary.goalsByPriority[goal.priority]++;
-    });
+        // Count goals by type and priority
+        goals.forEach(goal => {
+          summary.goalsByType[goal.goal_type]++;
+          summary.goalsByPriority[goal.priority]++;
+        });
 
-    return summary;
+        return summary;
+      },
+      this.CACHE_TTL,
+    );
   }
 
   private async createActivity(

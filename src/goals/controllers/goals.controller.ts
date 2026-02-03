@@ -8,6 +8,7 @@ import {
   Delete,
   Query,
   UseGuards,
+  UseInterceptors,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
@@ -30,6 +31,7 @@ import {
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from '../../shared/interceptors/tenant-context.interceptor';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { RequireRole } from '../../auth/decorators/roles.decorator';
@@ -43,6 +45,7 @@ import { Goal, GoalType, GoalStatus, GoalPriority } from '../entities/goal.entit
 @ApiTags('Goals')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, HouseholdGuard, RolesGuard)
+@UseInterceptors(TenantContextInterceptor)
 @Controller('goals')
 export class GoalsController {
   constructor(private readonly goalsService: GoalsService) {}

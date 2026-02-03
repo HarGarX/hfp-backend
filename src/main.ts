@@ -2,10 +2,21 @@ import './polyfills';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AppModule } from './app.module';
+import { EnhancedLoggingInterceptor } from '../libs/logger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true, // Buffer logs until Winston is ready
+  });
+
+  // Use Winston logger
+  app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
+
+  // Apply Enhanced Logging Interceptor globally
+  const enhancedLoggingInterceptor = app.get(EnhancedLoggingInterceptor);
+  app.useGlobalInterceptors(enhancedLoggingInterceptor);
   
   // Enable validation pipes globally
   app.useGlobalPipes(new ValidationPipe({

@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import {
@@ -32,6 +33,7 @@ import {
 import { Loan, LoanType, LoanStatus } from '../entities/loan.entity';
 import { LoanPayment } from '../entities/loan-payment.entity';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from '../../shared/interceptors/tenant-context.interceptor';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { CurrentHousehold } from '../../shared/decorators/current-household.decorator';
@@ -40,6 +42,7 @@ import { PaginationDto } from '../../shared/dto/pagination.dto';
 @ApiTags('loans')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, HouseholdGuard)
+@UseInterceptors(TenantContextInterceptor)
 @Controller('loans')
 export class LoansController {
   constructor(private readonly loansService: LoansService) {}

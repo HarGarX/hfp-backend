@@ -8,6 +8,7 @@ import {
   Delete,
   Query,
   UseGuards,
+  UseInterceptors,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
@@ -28,8 +29,10 @@ import {
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from '../../shared/interceptors/tenant-context.interceptor';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { HouseholdThrottlerGuard } from '../../../libs/throttle';
 import { RequireRole } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { CurrentHousehold } from '../../shared/decorators/current-household.decorator';
@@ -40,7 +43,8 @@ import { Transaction, TransactionType, TransactionStatus } from '../entities/tra
 
 @ApiTags('Transactions')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, HouseholdGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard, RolesGuard, HouseholdThrottlerGuard)
+@UseInterceptors(TenantContextInterceptor)
 @Controller('transactions')
 export class TransactionController {
   constructor(private readonly transactionService: TransactionService) {}

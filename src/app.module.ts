@@ -1,8 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
+import { APP_GUARD } from '@nestjs/core';
 import { CoreModule, AppConfigService } from '../libs/core';
 import { TenantModule } from '../libs/tenant';
+import { CacheModule } from '../libs/cache';
+import { ThrottleModule } from '../libs/throttle';
+import { LoggerModule } from '../libs/logger';
+import { RoleBasedThrottlerGuard } from '../libs/throttle';
 import { AuthModule } from './auth/auth.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -16,6 +21,7 @@ import { InsightsModule } from './insights/insights.module';
 import { SimulationsModule } from './simulations/simulations.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
+import { FeatureTogglesModule } from './feature-toggles/feature-toggles.module';
 import { JobsModule } from './jobs/jobs.module';
 import { SharedModule } from './shared/shared.module';
 import { SecurityTestModule } from './security-test/security-test.module';
@@ -36,16 +42,21 @@ import { NotificationTemplate } from './notifications/entities/notification-temp
 import { OnboardingStatus } from './onboarding/entities/onboarding-status.entity';
 import { Simulation } from './simulations/entities/simulation.entity';
 import { ScenarioRun } from './simulations/entities/scenario-run.entity';
+import { FeatureFlag } from './feature-toggles/entities/feature-flag.entity';
+import { FeatureOverride } from './feature-toggles/entities/feature-override.entity';
 
 @Module({
   imports: [
     CoreModule,
     TenantModule,
+    CacheModule,
+    ThrottleModule,
+    LoggerModule,
     TypeOrmModule.forRootAsync({
       useFactory: (configService: AppConfigService) => ({
         type: 'postgres',
         ...configService.database,
-        entities: [Household, User, Account, Transaction, Category, Goal, GoalActivity, Loan, LoanPayment, Insight, FinancialHealthScore, Notification, NotificationPreferences, NotificationTemplate, OnboardingStatus, Simulation, ScenarioRun],
+        entities: [Household, User, Account, Transaction, Category, Goal, GoalActivity, Loan, LoanPayment, Insight, FinancialHealthScore, Notification, NotificationPreferences, NotificationTemplate, OnboardingStatus, Simulation, ScenarioRun, FeatureFlag, FeatureOverride],
       }),
       inject: [AppConfigService],
     }),
@@ -71,10 +82,17 @@ import { ScenarioRun } from './simulations/entities/scenario-run.entity';
     NotificationsModule, 
     OnboardingModule,
     JobsModule,
+    FeatureTogglesModule,
     SecurityTestModule,
     SharedModule
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: RoleBasedThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

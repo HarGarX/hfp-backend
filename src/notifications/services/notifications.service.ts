@@ -7,12 +7,16 @@ import { UpdateNotificationDto, BulkUpdateNotificationsDto } from '../dto/update
 import { QueryNotificationsDto } from '../dto/query-notifications.dto';
 import { NotificationRepository } from '../repositories/notification.repository';
 import { NotificationPreferencesRepository } from '../repositories/notification-preferences.repository';
+import { CacheService } from '../../../libs/cache/cache.service';
 
 @Injectable()
 export class NotificationsService {
+  private readonly CACHE_TTL = 180; // 3 minutes (notifications change frequently)
+
   constructor(
     private readonly notificationRepository: NotificationRepository,
     private readonly preferencesRepository: NotificationPreferencesRepository,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(

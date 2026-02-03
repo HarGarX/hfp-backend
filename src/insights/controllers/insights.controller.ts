@@ -8,6 +8,7 @@ import {
   Delete,
   Query,
   UseGuards,
+  UseInterceptors,
   Request,
 } from '@nestjs/common';
 import {
@@ -27,12 +28,15 @@ import {
 } from '../dto';
 import { PaginationDto } from '../../shared/dto/pagination.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from '../../shared/interceptors/tenant-context.interceptor';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
+import { HouseholdThrottlerGuard } from '../../../libs/throttle';
 import { Insight } from '../entities/insight.entity';
 
 @ApiTags('insights')
 @Controller('insights')
-@UseGuards(JwtAuthGuard, HouseholdGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard, HouseholdThrottlerGuard)
+@UseInterceptors(TenantContextInterceptor)
 @ApiBearerAuth()
 export class InsightsController {
   constructor(private readonly insightsService: InsightsService) {}

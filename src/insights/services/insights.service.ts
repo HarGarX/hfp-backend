@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { CacheService } from '../../../libs/cache';
 import { Between, LessThan, MoreThan } from 'typeorm';
 import { Insight, InsightType, InsightStatus, InsightPriority } from '../entities/insight.entity';
 import { FinancialHealthScore, HealthScoreCategory } from '../entities/financial-health-score.entity';
@@ -33,6 +34,8 @@ import { LoanRepository } from '../../loans/repositories/loan.repository';
 
 @Injectable()
 export class InsightsService {
+  private readonly CACHE_TTL = 600; // 10 minutes (insights change less frequently)
+  
   constructor(
     private readonly insightRepository: InsightRepository,
     private readonly healthScoreRepository: FinancialHealthScoreRepository,
@@ -41,6 +44,7 @@ export class InsightsService {
     private readonly accountRepository: AccountsRepository,
     private readonly goalRepository: GoalRepository,
     private readonly loanRepository: LoanRepository,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(
@@ -54,7 +58,13 @@ export class InsightsService {
       user_id: createInsightDto.user_id || userId,
     });
 
-    return await this.insightRepository.saveWithHousehold(householdId, insight);
+    const savedInsight = await this.insightRepository.saveWithHousehold(householdId, insight);
+    
+    // Invalidate insights cache
+    await this.cacheService.del(householdId, 'insights:list');
+    await this.cacheService.del(householdId, 'insights:summary');
+    
+    return savedInsight;
   }
 
   async findAll(
@@ -122,6 +132,18 @@ export class InsightsService {
   }
 
   async findOne(id: string, householdId: string): Promise<Insight> {
+    // Try cache first
+    const cacheKey = `insights:${id}`;
+    const cached = await this.cacheService.get<Insight>(householdId, cacheKey);
+    
+    if (cached) {
+      // Still track view even with cache
+      cached.view_count += 1;
+      cached.last_viewed_at = new Date();
+      await this.insightRepository.saveWithHousehold(householdId, cached);
+      return cached;
+    }
+    
     const insight = await this.insightRepository.findOneWithHousehold(
       householdId,
       {
@@ -139,6 +161,9 @@ export class InsightsService {
     insight.last_viewed_at = new Date();
     await this.insightRepository.saveWithHousehold(householdId, insight);
 
+    // Cache the result
+    await this.cacheService.set(householdId, cacheKey, insight, this.CACHE_TTL);
+
     return insight;
   }
 
@@ -151,7 +176,14 @@ export class InsightsService {
 
     Object.assign(insight, updateInsightDto);
 
-    return await this.insightRepository.saveWithHousehold(householdId, insight);
+    const updated = await this.insightRepository.saveWithHousehold(householdId, insight);
+    
+    // Invalidate cache
+    await this.cacheService.del(householdId, `insights:${id}`);
+    await this.cacheService.del(householdId, 'insights:list');
+    await this.cacheService.del(householdId, 'insights:summary');
+    
+    return updated;
   }
 
   async acknowledge(
@@ -177,7 +209,14 @@ export class InsightsService {
       };
     }
 
-    return await this.insightRepository.saveWithHousehold(householdId, insight);
+    const updated = await this.insightRepository.saveWithHousehold(householdId, insight);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `insights:${id}`);
+    await this.cacheService.del(householdId, 'insights:list');
+    await this.cacheService.del(householdId, 'insights:summary');
+
+    return updated;
   }
 
   async dismiss(id: string, householdId: string): Promise<Insight> {
@@ -185,101 +224,120 @@ export class InsightsService {
     
     insight.status = InsightStatus.DISMISSED;
     
-    return await this.insightRepository.saveWithHousehold(householdId, insight);
+    const updated = await this.insightRepository.saveWithHousehold(householdId, insight);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `insights:${id}`);
+    await this.cacheService.del(householdId, 'insights:list');
+    await this.cacheService.del(householdId, 'insights:summary');
+
+    return updated;
   }
 
   async remove(id: string, householdId: string): Promise<void> {
     const insight = await this.findOne(id, householdId);
     await this.insightRepository.removeWithHousehold(householdId, insight);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `insights:${id}`);
+    await this.cacheService.del(householdId, 'insights:list');
+    await this.cacheService.del(householdId, 'insights:summary');
   }
 
   async getSummary(householdId: string): Promise<InsightSummaryDto> {
-    const insights = await this.insightRepository.findWithHousehold(householdId, {});
+    return this.cacheService.wrap(
+      householdId,
+      'insights:summary',
+      async () => {
+        const insights = await this.insightRepository.findWithHousehold(householdId, {});
 
-    const totalInsights = insights.length;
-    const activeInsights = insights.filter(i => i.status === InsightStatus.ACTIVE).length;
-    const criticalInsights = insights.filter(i => i.priority === InsightPriority.CRITICAL).length;
-    const actionableInsights = insights.filter(i => i.is_actionable).length;
+        const totalInsights = insights.length;
+        const activeInsights = insights.filter(i => i.status === InsightStatus.ACTIVE).length;
+        const criticalInsights = insights.filter(i => i.priority === InsightPriority.CRITICAL).length;
+        const actionableInsights = insights.filter(i => i.is_actionable).length;
 
-    // Calculate average rating
-    const ratedInsights = insights.filter(i => i.user_rating);
-    const averageRating = ratedInsights.length > 0 
-      ? ratedInsights.reduce((sum, i) => sum + i.user_rating!, 0) / ratedInsights.length 
-      : 0;
+        // Calculate average rating
+        const ratedInsights = insights.filter(i => i.user_rating);
+        const averageRating = ratedInsights.length > 0 
+          ? ratedInsights.reduce((sum, i) => sum + i.user_rating!, 0) / ratedInsights.length 
+          : 0;
 
-    // Calculate total potential savings
-    const totalPotentialSavings = insights.reduce((total, insight) => {
-      return total + insight.estimated_impact;
-    }, 0);
+        // Calculate total potential savings
+        const totalPotentialSavings = insights.reduce((total, insight) => {
+          return total + insight.estimated_impact;
+        }, 0);
 
-    // Top insight types
-    const typeCount: Record<string, number> = {};
-    insights.forEach(insight => {
-      typeCount[insight.type] = (typeCount[insight.type] || 0) + 1;
-    });
+        // Top insight types
+        const typeCount: Record<string, number> = {};
+        insights.forEach(insight => {
+          typeCount[insight.type] = (typeCount[insight.type] || 0) + 1;
+        });
 
-    const topInsightTypes = Object.entries(typeCount)
-      .map(([type, count]) => ({
-        type: type as InsightType,
-        count,
-        percentage: (count / totalInsights) * 100,
-      }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
+        const topInsightTypes = Object.entries(typeCount)
+          .map(([type, count]) => ({
+            type: type as InsightType,
+            count,
+            percentage: (count / totalInsights) * 100,
+          }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5);
 
-    // Engagement metrics
-    const acknowledgedInsights = insights.filter(i => i.acknowledged_at).length;
-    const dismissedInsights = insights.filter(i => i.status === InsightStatus.DISMISSED).length;
-    const totalViews = insights.reduce((sum, i) => sum + i.view_count, 0);
-    const averageViewsPerInsight = totalInsights > 0 ? totalViews / totalInsights : 0;
+        // Engagement metrics
+        const acknowledgedInsights = insights.filter(i => i.acknowledged_at).length;
+        const dismissedInsights = insights.filter(i => i.status === InsightStatus.DISMISSED).length;
+        const totalViews = insights.reduce((sum, i) => sum + i.view_count, 0);
+        const averageViewsPerInsight = totalInsights > 0 ? totalViews / totalInsights : 0;
 
-    // Calculate average time to acknowledgment
-    const acknowledgedWithTimes = insights.filter(i => i.acknowledged_at);
-    const averageTimeToAcknowledgment = acknowledgedWithTimes.length > 0
-      ? acknowledgedWithTimes.reduce((sum, insight) => {
-          const ackTime = new Date(insight.acknowledged_at!).getTime();
-          const createTime = new Date(insight.created_at).getTime();
-          return sum + (ackTime - createTime);
-        }, 0) / acknowledgedWithTimes.length / (1000 * 60 * 60) // Convert to hours
-      : 0;
+        // Calculate average time to acknowledgment
+        const acknowledgedWithTimes = insights.filter(i => i.acknowledged_at);
+        const averageTimeToAcknowledgment = acknowledgedWithTimes.length > 0
+          ? acknowledgedWithTimes.reduce((sum, insight) => {
+              const ackTime = new Date(insight.acknowledged_at!).getTime();
+              const createTime = new Date(insight.created_at).getTime();
+              return sum + (ackTime - createTime);
+            }, 0) / acknowledgedWithTimes.length / (1000 * 60 * 60) // Convert to hours
+          : 0;
 
-    // Generation trend
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-    const twoWeeksAgo = new Date();
-    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+        // Generation trend
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        const twoWeeksAgo = new Date();
+        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
 
-    const thisWeekInsights = insights.filter(i => 
-      new Date(i.created_at) >= oneWeekAgo
-    ).length;
-    const lastWeekInsights = insights.filter(i => 
-      new Date(i.created_at) >= twoWeeksAgo && new Date(i.created_at) < oneWeekAgo
-    ).length;
+        const thisWeekInsights = insights.filter(i => 
+          new Date(i.created_at) >= oneWeekAgo
+        ).length;
+        const lastWeekInsights = insights.filter(i => 
+          new Date(i.created_at) >= twoWeeksAgo && new Date(i.created_at) < oneWeekAgo
+        ).length;
 
-    const changePercentage = lastWeekInsights > 0 
-      ? ((thisWeekInsights - lastWeekInsights) / lastWeekInsights) * 100 
-      : 0;
+        const changePercentage = lastWeekInsights > 0 
+          ? ((thisWeekInsights - lastWeekInsights) / lastWeekInsights) * 100 
+          : 0;
 
-    return {
-      total_insights: totalInsights,
-      active_insights: activeInsights,
-      critical_insights: criticalInsights,
-      actionable_insights: actionableInsights,
-      average_rating: averageRating,
-      total_potential_savings: totalPotentialSavings,
-      top_insight_types: topInsightTypes,
-      engagement_metrics: {
-        average_views_per_insight: averageViewsPerInsight,
-        acknowledgment_rate: totalInsights > 0 ? (acknowledgedInsights / totalInsights) * 100 : 0,
-        dismissal_rate: totalInsights > 0 ? (dismissedInsights / totalInsights) * 100 : 0,
-        average_time_to_acknowledgment_hours: averageTimeToAcknowledgment,
+        return {
+          total_insights: totalInsights,
+          active_insights: activeInsights,
+          critical_insights: criticalInsights,
+          actionable_insights: actionableInsights,
+          average_rating: averageRating,
+          total_potential_savings: totalPotentialSavings,
+          top_insight_types: topInsightTypes,
+          engagement_metrics: {
+            average_views_per_insight: averageViewsPerInsight,
+            acknowledgment_rate: totalInsights > 0 ? (acknowledgedInsights / totalInsights) * 100 : 0,
+            dismissal_rate: totalInsights > 0 ? (dismissedInsights / totalInsights) * 100 : 0,
+            average_time_to_acknowledgment_hours: averageTimeToAcknowledgment,
+          },
+          generation_trend: {
+            this_week: thisWeekInsights,
+            last_week: lastWeekInsights,
+            change_percentage: changePercentage,
+          },
+        };
       },
-      generation_trend: {
-        this_week: thisWeekInsights,
-        last_week: lastWeekInsights,
-        change_percentage: changePercentage,
-      },
-    };
+      this.CACHE_TTL,
+    );
   }
 
   async generateSpendingPatternInsights(householdId: string): Promise<Insight[]> {

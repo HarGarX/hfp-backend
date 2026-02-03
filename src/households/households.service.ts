@@ -4,12 +4,16 @@ import { Household, HouseholdStatus } from './entities/household.entity';
 import { CreateHouseholdDto } from './dto/create-household.dto';
 import { UpdateHouseholdDto } from './dto/update-household.dto';
 import { TenantContextService } from '../../libs/tenant';
+import { CacheService } from '../../libs/cache/cache.service';
 
 @Injectable()
 export class HouseholdsService {
+  private readonly CACHE_TTL = 300; // 5 minutes
+
   constructor(
     private readonly householdRepository: HouseholdRepository,
     private readonly tenantContextService: TenantContextService,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(createHouseholdDto: CreateHouseholdDto, createdBy?: string): Promise<Household> {
@@ -29,7 +33,12 @@ export class HouseholdsService {
       total_expenses: 0,
     };
 
-    return this.householdRepository.create(householdData);
+    const household = await this.householdRepository.create(householdData);
+
+    // Invalidate list cache
+    await this.cacheService.del(household.id, 'households:list');
+
+    return household;
   }
 
   async findAll(options: HouseholdQueryOptions = {}): Promise<PaginatedHouseholds> {
@@ -37,12 +46,21 @@ export class HouseholdsService {
   }
 
   async findOne(id: string, userId?: string): Promise<Household> {
+    // Try cache first
+    const cacheKey = `households:${id}`;
+    const cached = await this.cacheService.get<Household>(id, cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const household = await this.householdRepository.findById(id);
 
     if (!household) {
       throw new NotFoundException('Household not found');
     }
 
+    // Cache the result
+    await this.cacheService.set(id, cacheKey, household, this.CACHE_TTL);
     return household;
   }
 
@@ -60,6 +78,11 @@ export class HouseholdsService {
       throw new NotFoundException('Household not found or access denied');
     }
 
+    // Invalidate caches
+    await this.cacheService.del(id, `households:${id}`);
+    await this.cacheService.del(id, 'households:list');
+    await this.cacheService.del(id, `households:${id}:stats`);
+
     return updatedHousehold;
   }
 
@@ -75,6 +98,11 @@ export class HouseholdsService {
     if (!deleted) {
       throw new ForbiddenException('Access denied or household not found');
     }
+
+    // Invalidate caches
+    await this.cacheService.del(id, `households:${id}`);
+    await this.cacheService.del(id, 'households:list');
+    await this.cacheService.del(id, `households:${id}:stats`);
   }
 
   async updateMemberCount(householdId: string): Promise<void> {
@@ -111,15 +139,22 @@ export class HouseholdsService {
     netIncome: number;
     status: HouseholdStatus;
   }> {
-    const household = await this.findOne(householdId);
+    return this.cacheService.wrap(
+      householdId,
+      `households:${householdId}:stats`,
+      async () => {
+        const household = await this.findOne(householdId);
 
-    return {
-      memberCount: household.member_count,
-      totalIncome: Number(household.total_income),
-      totalExpenses: Number(household.total_expenses),
-      netIncome: Number(household.total_income) - Number(household.total_expenses),
-      status: household.status,
-    };
+        return {
+          memberCount: household.member_count,
+          totalIncome: Number(household.total_income),
+          totalExpenses: Number(household.total_expenses),
+          netIncome: Number(household.total_income) - Number(household.total_expenses),
+          status: household.status,
+        };
+      },
+      this.CACHE_TTL,
+    );
   }
 
   async activate(householdId: string): Promise<Household> {

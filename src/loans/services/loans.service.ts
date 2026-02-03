@@ -24,12 +24,16 @@ import {
 import { PaginationDto } from '../../shared/dto/pagination.dto';
 import { LoanRepository } from '../repositories/loan.repository';
 import { LoanPaymentRepository } from '../repositories/loan-payment.repository';
+import { CacheService } from '../../../libs/cache/cache.service';
 
 @Injectable()
 export class LoansService {
+  private readonly CACHE_TTL = 300; // 5 minutes
+
   constructor(
     private readonly loanRepository: LoanRepository,
     private readonly loanPaymentRepository: LoanPaymentRepository,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(
@@ -50,7 +54,13 @@ export class LoansService {
       total_interest_paid: 0,
     });
 
-    return await this.loanRepository.saveWithHousehold(householdId, loan);
+    const saved = await this.loanRepository.saveWithHousehold(householdId, loan);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, 'loans:list');
+    await this.cacheService.del(householdId, 'loans:summary');
+
+    return saved;
   }
 
   async findAll(
@@ -90,6 +100,13 @@ export class LoansService {
   }
 
   async findOne(id: string, householdId: string): Promise<Loan> {
+    // Try cache first
+    const cacheKey = `loans:${id}`;
+    const cached = await this.cacheService.get<Loan>(householdId, cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const loan = await this.loanRepository.findOneWithHousehold(
       householdId,
       {
@@ -102,6 +119,8 @@ export class LoansService {
       throw new NotFoundException('Loan not found');
     }
 
+    // Cache the result
+    await this.cacheService.set(householdId, cacheKey, loan, this.CACHE_TTL);
     return loan;
   }
 
@@ -115,12 +134,24 @@ export class LoansService {
     // Update loan properties
     Object.assign(loan, updateLoanDto);
 
-    return await this.loanRepository.saveWithHousehold(householdId, loan);
+    const updated = await this.loanRepository.saveWithHousehold(householdId, loan);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `loans:${id}`);
+    await this.cacheService.del(householdId, 'loans:list');
+    await this.cacheService.del(householdId, 'loans:summary');
+
+    return updated;
   }
 
   async remove(id: string, householdId: string): Promise<void> {
     const loan = await this.findOne(id, householdId);
     await this.loanRepository.removeWithHousehold(householdId, loan);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `loans:${id}`);
+    await this.cacheService.del(householdId, 'loans:list');
+    await this.cacheService.del(householdId, 'loans:summary');
   }
 
   async getSummary(householdId: string): Promise<LoanSummaryDto> {

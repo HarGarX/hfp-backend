@@ -8,6 +8,7 @@ import {
   Delete,
   Query,
   UseGuards,
+  UseInterceptors,
   Request,
 } from '@nestjs/common';
 import {
@@ -19,6 +20,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from '../../shared/interceptors/tenant-context.interceptor';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { RequireRole } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '../../users/entities/user.entity';
@@ -36,6 +38,7 @@ import { QueryNotificationsDto, NotificationStatsDto } from '../dto/query-notifi
 @ApiBearerAuth()
 @Controller('notifications')
 @UseGuards(JwtAuthGuard, HouseholdGuard)
+@UseInterceptors(TenantContextInterceptor)
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 

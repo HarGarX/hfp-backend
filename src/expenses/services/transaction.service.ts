@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
+import { CacheService } from '../../../libs/cache';
 import { Transaction, TransactionType, TransactionStatus } from '../entities/transaction.entity';
 import { CreateTransactionDto, UpdateTransactionDto } from '../dto';
 import { TransactionRepository } from '../repositories/transaction.repository';
@@ -36,9 +37,12 @@ export interface TransactionSummary {
 
 @Injectable()
 export class TransactionService {
+  private readonly CACHE_TTL = 180; // 3 minutes (shorter for frequently changing data)
+  
   constructor(
     private readonly transactionRepository: TransactionRepository,
     private readonly accountRepository: AccountsRepository,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(
@@ -92,7 +96,13 @@ export class TransactionService {
         : undefined,
     });
 
-    return this.transactionRepository.saveWithHousehold(householdId, transaction);
+    const savedTransaction = await this.transactionRepository.saveWithHousehold(householdId, transaction);
+    
+    // Invalidate transaction cache
+    await this.cacheService.del(householdId, 'transactions:list');
+    await this.cacheService.del(householdId, 'transactions:summary');
+    
+    return savedTransaction;
   }
 
   async findAll(
@@ -185,6 +195,14 @@ export class TransactionService {
   }
 
   async findOne(id: string, householdId: string): Promise<Transaction> {
+    // Try cache first
+    const cacheKey = `transactions:${id}`;
+    const cached = await this.cacheService.get<Transaction>(householdId, cacheKey);
+    
+    if (cached) {
+      return cached;
+    }
+    
     const transaction = await this.transactionRepository.findOneWithHousehold(householdId, {
       where: { id },
       relations: ['account', 'category', 'transfer_account', 'created_by_user'],
@@ -193,6 +211,9 @@ export class TransactionService {
     if (!transaction) {
       throw new NotFoundException('Transaction not found');
     }
+
+    // Cache the result
+    await this.cacheService.set(householdId, cacheKey, transaction, this.CACHE_TTL);
 
     return transaction;
   }
@@ -237,12 +258,24 @@ export class TransactionService {
         : transaction.recurring_end_date,
     });
 
-    return this.transactionRepository.saveWithHousehold(householdId, transaction);
+    const updated = await this.transactionRepository.saveWithHousehold(householdId, transaction);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `transactions:${id}`);
+    await this.cacheService.del(householdId, 'transactions:list');
+    await this.cacheService.del(householdId, 'transactions:summary');
+
+    return updated;
   }
 
   async remove(id: string, householdId: string): Promise<void> {
     const transaction = await this.findOne(id, householdId);
     await this.transactionRepository.softDelete(id);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `transactions:${id}`);
+    await this.cacheService.del(householdId, 'transactions:list');
+    await this.cacheService.del(householdId, 'transactions:summary');
   }
 
   async getTransactionSummary(
@@ -250,55 +283,65 @@ export class TransactionService {
     startDate?: string,
     endDate?: string,
   ): Promise<TransactionSummary> {
-    const query = this.transactionRepository
-      .createQueryBuilderWithHousehold(householdId, 'transaction')
-      .andWhere('transaction.status = :status', { status: TransactionStatus.COMPLETED });
+    // Create unique cache key based on date filters
+    const cacheKey = `transactions:summary:${startDate || 'all'}:${endDate || 'all'}`;
 
-    if (startDate) {
-      query.andWhere('transaction.date >= :startDate', { startDate });
-    }
+    return this.cacheService.wrap(
+      householdId,
+      cacheKey,
+      async () => {
+        const query = this.transactionRepository
+          .createQueryBuilderWithHousehold(householdId, 'transaction')
+          .andWhere('transaction.status = :status', { status: TransactionStatus.COMPLETED });
 
-    if (endDate) {
-      query.andWhere('transaction.date <= :endDate', { endDate });
-    }
+        if (startDate) {
+          query.andWhere('transaction.date >= :startDate', { startDate });
+        }
 
-    const transactions = await query.getMany();
+        if (endDate) {
+          query.andWhere('transaction.date <= :endDate', { endDate });
+        }
 
-    const totalTransactions = transactions.length;
-    const totalIncome = transactions
-      .filter(t => t.transaction_type === TransactionType.INCOME)
-      .reduce((sum, t) => sum + Number(t.amount), 0);
-    
-    const totalExpenses = transactions
-      .filter(t => t.transaction_type === TransactionType.EXPENSE)
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+        const transactions = await query.getMany();
 
-    const netAmount = totalIncome - totalExpenses;
-    const averageTransactionAmount = totalTransactions > 0 
-      ? transactions.reduce((sum, t) => sum + Number(t.amount), 0) / totalTransactions 
-      : 0;
+        const totalTransactions = transactions.length;
+        const totalIncome = transactions
+          .filter(t => t.transaction_type === TransactionType.INCOME)
+          .reduce((sum, t) => sum + Number(t.amount), 0);
+        
+        const totalExpenses = transactions
+          .filter(t => t.transaction_type === TransactionType.EXPENSE)
+          .reduce((sum, t) => sum + Number(t.amount), 0);
 
-    // Group by type
-    const transactionsByType = transactions.reduce((acc, transaction) => {
-      acc[transaction.transaction_type] = (acc[transaction.transaction_type] || 0) + 1;
-      return acc;
-    }, {} as Record<TransactionType, number>);
+        const netAmount = totalIncome - totalExpenses;
+        const averageTransactionAmount = totalTransactions > 0 
+          ? transactions.reduce((sum, t) => sum + Number(t.amount), 0) / totalTransactions 
+          : 0;
 
-    // Group by status
-    const transactionsByStatus = transactions.reduce((acc, transaction) => {
-      acc[transaction.status] = (acc[transaction.status] || 0) + 1;
-      return acc;
-    }, {} as Record<TransactionStatus, number>);
+        // Group by type
+        const transactionsByType = transactions.reduce((acc, transaction) => {
+          acc[transaction.transaction_type] = (acc[transaction.transaction_type] || 0) + 1;
+          return acc;
+        }, {} as Record<TransactionType, number>);
 
-    return {
-      totalTransactions,
-      totalIncome,
-      totalExpenses,
-      netAmount,
-      averageTransactionAmount,
-      transactionsByType,
-      transactionsByStatus,
-    };
+        // Group by status
+        const transactionsByStatus = transactions.reduce((acc, transaction) => {
+          acc[transaction.status] = (acc[transaction.status] || 0) + 1;
+          return acc;
+        }, {} as Record<TransactionStatus, number>);
+
+        return {
+          totalTransactions,
+          totalIncome,
+          totalExpenses,
+          netAmount,
+          averageTransactionAmount,
+          transactionsByType,
+          transactionsByStatus,
+        };
+      },
+      this.CACHE_TTL,
+    );
   }
 
   async updateStatus(
@@ -308,7 +351,14 @@ export class TransactionService {
   ): Promise<Transaction> {
     const transaction = await this.findOne(id, householdId);
     transaction.status = status;
-    return this.transactionRepository.saveWithHousehold(householdId, transaction);
+    const updated = await this.transactionRepository.saveWithHousehold(householdId, transaction);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `transactions:${id}`);
+    await this.cacheService.del(householdId, 'transactions:list');
+    await this.cacheService.del(householdId, 'transactions:summary');
+
+    return updated;
   }
 
   async duplicateTransaction(
@@ -333,6 +383,12 @@ export class TransactionService {
     delete duplicateData.updated_at;
 
     const newTransaction = this.transactionRepository.create(duplicateData);
-    return this.transactionRepository.saveWithHousehold(householdId, newTransaction);
+    const saved = await this.transactionRepository.saveWithHousehold(householdId, newTransaction);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, 'transactions:list');
+    await this.cacheService.del(householdId, 'transactions:summary');
+
+    return saved;
   }
 }

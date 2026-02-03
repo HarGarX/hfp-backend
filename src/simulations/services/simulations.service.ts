@@ -5,6 +5,7 @@ import { Simulation, SimulationType, SimulationStatus } from '../entities/simula
 import { ScenarioRun } from '../entities/scenario-run.entity';
 import { SimulationRepository } from '../repositories/simulation.repository';
 import { ScenarioEngineService } from './scenario-engine.service';
+import { CacheService } from '../../../libs/cache/cache.service';
 import {
   CreateSimulationDto,
   UpdateSimulationDto,
@@ -19,12 +20,14 @@ import {
 @Injectable()
 export class SimulationsService {
   private readonly logger = new Logger(SimulationsService.name);
+  private readonly CACHE_TTL = 300; // 5 minutes
 
   constructor(
     private readonly simulationRepository: SimulationRepository,
     @InjectRepository(ScenarioRun)
     private readonly scenarioRunRepository: Repository<ScenarioRun>,
     private readonly scenarioEngine: ScenarioEngineService,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(
@@ -40,7 +43,12 @@ export class SimulationsService {
       scenarios: createSimulationDto.scenarios || [],
     });
 
-    return this.simulationRepository.saveWithHousehold(householdId, simulation);
+    const saved = await this.simulationRepository.saveWithHousehold(householdId, simulation);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, 'simulations:list');
+
+    return saved;
   }
 
   async findAll(householdId: string, page = 1, limit = 20): Promise<{

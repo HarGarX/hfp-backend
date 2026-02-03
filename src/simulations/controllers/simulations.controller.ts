@@ -8,9 +8,11 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from '../../shared/interceptors/tenant-context.interceptor';
 import { HouseholdGuard } from '../../shared/guards/household.guard';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { CurrentHousehold } from '../../shared/decorators/current-household.decorator';
@@ -25,6 +27,7 @@ import {
 @ApiTags('Simulations')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, HouseholdGuard)
+@UseInterceptors(TenantContextInterceptor)
 @Controller('simulations')
 export class SimulationsController {
   constructor(private readonly simulationsService: SimulationsService) {}

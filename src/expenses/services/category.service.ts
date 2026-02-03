@@ -7,6 +7,7 @@ import {
 import { Category, CategoryType } from '../entities/category.entity';
 import { CreateCategoryDto, UpdateCategoryDto } from '../dto';
 import { CategoryRepository } from '../repositories/category.repository';
+import { CacheService } from '../../../libs/cache/cache.service';
 
 export interface CategoryQueryOptions {
   search?: string;
@@ -26,8 +27,11 @@ export interface CategoryWithStats {
 
 @Injectable()
 export class CategoryService {
+  private readonly CACHE_TTL = 300; // 5 minutes
+
   constructor(
     private readonly categoryRepository: CategoryRepository,
+    private readonly cacheService: CacheService,
   ) {}
 
   async create(
@@ -74,7 +78,13 @@ export class CategoryService {
       created_by: userId,
     });
 
-    return this.categoryRepository.saveWithHousehold(householdId, category);
+    const saved = await this.categoryRepository.saveWithHousehold(householdId, category);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, 'categories:list');
+    await this.cacheService.del(householdId, 'categories:hierarchy');
+
+    return saved;
   }
 
   async findAll(
@@ -140,6 +150,13 @@ export class CategoryService {
   }
 
   async findOne(id: string, householdId: string): Promise<Category> {
+    // Try cache first
+    const cacheKey = `categories:${id}`;
+    const cached = await this.cacheService.get<Category>(householdId, cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const category = await this.categoryRepository.findOneWithHousehold(householdId, {
       where: { id },
       relations: ['subcategories', 'parent', 'created_by_user'],
@@ -149,6 +166,8 @@ export class CategoryService {
       throw new NotFoundException('Category not found');
     }
 
+    // Cache the result
+    await this.cacheService.set(householdId, cacheKey, category, this.CACHE_TTL);
     return category;
   }
 
@@ -204,7 +223,14 @@ export class CategoryService {
     }
 
     Object.assign(category, updateCategoryDto);
-    return this.categoryRepository.saveWithHousehold(householdId, category);
+    const updated = await this.categoryRepository.saveWithHousehold(householdId, category);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `categories:${id}`);
+    await this.cacheService.del(householdId, 'categories:list');
+    await this.cacheService.del(householdId, 'categories:hierarchy');
+
+    return updated;
   }
 
   async remove(id: string, householdId: string): Promise<void> {
@@ -222,6 +248,11 @@ export class CategoryService {
     // TODO: Check if category has transactions and handle appropriately
     // For now, we'll do a soft delete
     await this.categoryRepository.softDelete(id);
+
+    // Invalidate caches
+    await this.cacheService.del(householdId, `categories:${id}`);
+    await this.cacheService.del(householdId, 'categories:list');
+    await this.cacheService.del(householdId, 'categories:hierarchy');
   }
 
   async getHierarchy(householdId: string, categoryType?: CategoryType): Promise<Category[]> {
